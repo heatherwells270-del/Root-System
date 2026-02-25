@@ -1,0 +1,16 @@
+{
+  "communities": [
+    {
+      "id": "washington-dc",
+      "name": "Washington DC",
+      "state": "DC",
+      "zip_codes": ["20001","20002","20003","20004","20005","20006","20007","20008","20009","20010","20011","20012","20015","20016","20017","20018","20019","20020","20024","20032","20036","20037"],
+      "lat": 38.9072,
+      "lng": -77.0369,
+      "url": "https://dc.rootsystem.org",
+      "planted": "2026-02-25",
+      "status": "active",
+      "description": "Community board for Washington DC neighbors"
+    }
+  ]
+}

@@ -1,5 +1,4 @@
-# Root-System
-
+# Root System
 ### A Mutual Aid Network, Time Bank & Knowledge Commons
 
 ---
@@ -49,7 +48,6 @@ git clone https://github.com/YOUR-USERNAME/root-system
 cd root-system
 npm install
 npm run dev
----
 
 ## Privacy & Data
 

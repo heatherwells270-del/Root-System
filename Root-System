@@ -1,0 +1,840 @@
+import { useState, useEffect, useRef, useCallback } from "react";
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ROOT SYSTEM v3 — LAYERS 1+2+3
+// Mutual Aid Network · Time Bank · Knowledge Commons
+// L1: Safety (device ID, covenant, rate limits, contact protect, block/mute)
+// L2: Geography (zip+distance), Post Expiration (7d), Free Items/Services
+// L3: Appeals + Community Review, Trust Transparency, Scam Pattern Warnings
+// ═══════════════════════════════════════════════════════════════════════════════
+// KNOWN LIMITATION: No-account architecture = identity unverifiable.
+// KNOWN LIMITATION: Community-only moderation = harmful content visible before flagged.
+// KNOWN LIMITATION: Age verification is self-reported.
+// ARCHITECTURE: Degrades gracefully. Silence biased toward restoration.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const fontLink = document.createElement("link");
+fontLink.rel = "stylesheet";
+fontLink.href = "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;0,700;1,300;1,400;1,600&family=Crimson+Text:ital,wght@0,400;0,600;1,400&family=IM+Fell+DW+Pica:ital@0;1&display=swap";
+document.head.appendChild(fontLink);
+
+// ─── UI STRINGS ───────────────────────────────────────────────────────────────
+const S = {
+  header: { eyebrow:"Mutual Aid · Time Banking · Knowledge Commons", title:"Root System", subtitle:"Neighbors helping neighbors", vine:"✦ ❧ ✦ ❧ ✦" },
+  nav: { browse:"Browse", post:"Offer or Seek", timebank:"Time Bank", coalitions:"Coalitions", review:"Review", safety:"Safe Exchange", about:"The Compact" },
+  covenant: { minorNotice:"Root System is for adults. If you are under 18 and need help, please reach out to a trusted adult, call 211 for local services, or text HOME to 741741 for crisis support. You deserve help from people who are responsible for you — not from strangers on the internet.", checkbox1:"I have read this Covenant and I enter this space in good faith", checkbox2:"I confirm I am 18 years of age or older", enterBtn:"Enter the Commons", wrongAnswer:"Re-read this section and try again." },
+  rateLimit: { postLimit:"You've shared generously today. Come back tomorrow.", postBurst:"Take a breath — you can post again in a few minutes.", flagLimit:"Thank you for helping keep this space safe.", remaining:n=>`${n} of 5 posts remaining today` },
+  contact: { revealBtn:"Tap to see contact info", safetyMsg:"Meet in public first. Trust your instincts. Prefer Signal for private communication. Be cautious about platforms you're unfamiliar with." },
+  block: { unblockBtn:"Unblock" },
+  browse: { sectionLabel:(o,n,f)=>`Active Posts — ${o} Offerings · ${n} Needs · ${f} Freely Given`, empty:"Nothing here yet. Be the first to plant something.", allFilter:"All", offerFilter:"Offering", needFilter:"Seeking", freeFilter:"Freely Given", allZones:"All Zones", searchPlaceholder:"search…", printBtn:"Print Bulletin" },
+  post: { title:"Weave yourself in.", desc:"Post what you need or what you can offer. No account, no algorithm, no corporate middleman.", compactTitle:"Community Compact — Read Before Posting", privacyWarning:"Posts on this platform are public. Anyone with the link can read them. Consider what you share.", offering:"Offering", seeking:"Seeking / Needing", freeGiving:"Giving Free", freeSubLabel:"What kind?", catLabel:"Category", zoneLabel:"Zone", zoneHint:"General area only — never post a street address.", titleLabel:"Headline", titlePH:"Short, clear, honest", bodyLabel:"Details", bodyPH:"Tell the community what you can offer or what you need.", contactLabel:"How to reach you", contactPH:"Signal, ProtonMail, email, phone", contactHint:"Consider Signal or ProtonMail for privacy.", handleLabel:"Name or handle (optional)", handlePH:"Anonymous is fine", tbLabel:"Time bank hours (blank if N/A)", tagsLabel:"Tags (comma separated)", tagsPH:"e.g. plumbing, tools, teaching", submitBtn:"Post to the Network", successMsg:"Your offering is woven into the network." },
+  zip: { prompt:"Where are you rooted?", hint:"Stays on your device.", changeBtn:"Change", notFound:"Couldn't find that zip." },
+  expiration: { expired:"Expired", today:"expires today", daysLeft:d=>`${d}d left`, renewBtn:"Renew", renewed:"Renewed for 7 more days." },
+  timebank: { sectionLabel:"Time Banking — One Hour Equals One Hour", desc:"A plumber's hour and a childcare provider's hour are worth the same. Log your exchanges. Build the communal ledger.", totalHours:"total hours exchanged", totalExchanges:"exchanges logged", logLabel:"Log an Exchange", submitBtn:"Record Exchange", successMsg:"Exchange recorded. The ledger grows.", ledgerLabel:"Exchange Ledger", emptyLedger:"The ledger is empty. Start the record." },
+  coalitions: { sectionLabel:"Coalitions — Collective Projects & Working Groups", desc:"Some work is bigger than one person. Start a coalition — kitchen collective, tool library, childcare pod.", startLabel:"Start a Coalition", submitBtn:"Start Coalition", successMsg:"Coalition started. Others can find you now." },
+  review: { sectionLabel:"Community Review", desc:"Posts hidden by community flags can be appealed. Review appeals and vote to restore or uphold removal.", empty:"No pending appeals. The commons is at peace.", restoreBtn:"Restore", upholdBtn:"Uphold Removal", appealLabel:"Appeal this removal", appealPH:"Tell the community why this post should be restored (500 chars)", appealSubmit:"Submit Appeal", appealSuccess:"Appeal submitted. The community will review.", votedMsg:"Vote recorded. Thank you.", expiredMsg:"This appeal has expired." },
+  trust: { title:"Trust Score", explainer:"Trust scores help the community gauge reliability. They start at 5.0 and change based on activity.", startVal:"+5.0 — Starting value for all new devices", exchange:"+0.5 — Completed exchange (both confirm)", survives:"+0.2 — Post stays up 7+ days without flags", flagPenalty:"-1.0 — Each flag received", removal:"-2.0 — Post removed by community", appealBonus:"+1.0 — Successful appeal (wrongful flag)", floor:"Floor: 2.0 — Caution, not exile", ceiling:"Ceiling: 10.0" },
+  scam: { payment:"This post mentions payment platforms. Root System is for direct exchanges, not financial transactions.", urgency:"This post uses urgency language. Take your time.", offPlatform:"Consider using Signal or ProtonMail instead of the platforms mentioned.", documents:"Never share personal documents through this platform.", tooGood:"High-value free offers from strangers deserve extra scrutiny." },
+  footer: { name:"Root System — Community Commons", license:"Free · Open Source · No Ads · 18+", use:"Use It Freely", crisis:"Are you safe? thehotline.org | In crisis? 988 · Text HOME to 741741 · DV: 1-800-799-7233" },
+};
+
+// ─── CONSTANTS ────────────────────────────────────────────────────────────────
+const CATEGORIES = [
+  { id:"skills", label:"Skills & Teaching", emoji:"🌿" }, { id:"goods", label:"Goods & Supplies", emoji:"📦" },
+  { id:"care", label:"Care & Mutual Support", emoji:"🤲" }, { id:"food", label:"Food & Garden", emoji:"🌱" },
+  { id:"tech", label:"Tech & Digital", emoji:"⚙️" }, { id:"housing", label:"Housing & Space", emoji:"🏡" },
+  { id:"transport", label:"Transport & Errands", emoji:"🚲" }, { id:"knowledge", label:"Knowledge Archive", emoji:"📜" },
+  { id:"grief", label:"Grief & Transition", emoji:"🕯️" }, { id:"labor", label:"Labor & Job Loss", emoji:"✊" },
+];
+const ZONES = ["Any / Network-wide","North Side","South Side","East End","West End","Downtown","Rural Route","Online / Remote"];
+const COMPACT_RULES = ["This space is for mutual aid — give, receive, trade, teach. Not for profit.","No addresses. Use neighborhoods, not street numbers. Meet in public first.","No demands for upfront payment. No pressure. No urgency tactics.","Use only what you actually have to offer.","If something feels wrong, flag it.","This is not a marketplace, a dating platform, or a surveillance tool."];
+const RADIUS_OPTIONS = [{ value:"any", label:"Any distance" },{ value:"5", label:"Within 5 mi" },{ value:"10", label:"Within 10 mi" },{ value:"25", label:"Within 25 mi" },{ value:"50", label:"Within 50 mi" }];
+const FREE_SUBTYPES = [{ id:"items", label:"Items" },{ id:"services", label:"Services" },{ id:"knowledge", label:"Knowledge" }];
+const RATE = { POST_MAX_24H:5, POST_MAX_10M:2, FLAG_MAX_24H:20, VOTE_MAX_24H:3, MS_24H:86400000, MS_10M:600000, FLAG_THRESHOLD:3, EXPIRY_DAYS:7, RENEW_WARN:2, APPEAL_EXPIRY_DAYS:7, APPEAL_RESTORE:5, APPEAL_UPHOLD:10, GRACEFUL_DECAY_DAYS:3 };
+const TRUST = { STARTING:5.0, FLOOR:2.0, CEILING:10.0, EXCHANGE_BONUS:0.5, POST_SURVIVES:0.2, FLAG_PENALTY:-1.0, REMOVAL_PENALTY:-2.0, APPEAL_BONUS:1.0 };
+
+// ─── SCAM PATTERNS ────────────────────────────────────────────────────────────
+const SCAM_PATTERNS = [
+  { id:"payment", regex:/\b(venmo|cashapp|cash\s*app|zelle|paypal|gofundme|donation|donate)\b/i, msg:S.scam.payment },
+  { id:"urgency", regex:/\b(act now|limited time|today only|must respond|urgent|ASAP|don't wait|hurry)\b/i, msg:S.scam.urgency },
+  { id:"offplatform", regex:/\b(telegram|instagram\s*dm|whatsapp|kik|snapchat)\b/i, msg:S.scam.offPlatform },
+  { id:"documents", regex:/\b(send.{0,10}(id|ssn|license|passport|social\s*security)|photo\s*id|personal\s*documents)\b/i, msg:S.scam.documents },
+  { id:"tooGood", regex:/\$\s*[5-9]\d{2,}|\$\s*\d{4,}|\bfree.{0,15}(iphone|laptop|car|tv|gift\s*card)/i, msg:S.scam.tooGood },
+];
+function detectScamWarnings(post) {
+  const text = (post.title + " " + post.body).toLowerCase();
+  return SCAM_PATTERNS.filter(p => p.regex.test(post.title + " " + post.body)).map(p => ({ id:p.id, msg:p.msg }));
+}
+
+// ─── ZIP CENTROIDS (compact encoded) ──────────────────────────────────────────
+const ZIP_COMPACT = [
+  "100:40.71:-74.01,101:40.75:-73.99,104:40.68:-73.97,105:40.9:-73.86,110:40.65:-73.78,112:40.64:-73.95,113:40.72:-73.91",
+  "114:40.77:-73.88,115:40.59:-73.96,117:40.74:-73.42,118:40.82:-73.2,119:40.91:-72.66,120:42.65:-73.76,121:42.44:-73.25",
+  "122:43.08:-73.78,123:42.81:-73.95,124:41.74:-74.08,125:41.5:-74.36,126:41.94:-74.77,127:42.09:-75.92,128:42.44:-76.5",
+  "130:43.05:-76.15,131:43.21:-75.46,132:43.1:-75.23,133:44.7:-73.45,134:43.97:-76.14,135:43.45:-75.07,137:42.1:-79.24",
+  "140:42.89:-78.88,141:42.98:-78.73,142:43:-78.19,143:42.09:-77.05,144:43.16:-77.62,145:42.34:-78.3,146:43.2:-77.61",
+  "147:42.13:-79.04,148:42.65:-76.18,150:40.44:-80,151:40.44:-79.95,152:40.5:-79.95,153:40.36:-79.93,154:40.51:-80.35",
+  "155:40.23:-79.52,156:40.62:-79.15,157:40.31:-78.92,158:41.41:-79.68,159:40.91:-79.84,160:41.07:-80.09,161:41.23:-79.38",
+  "162:41.44:-78.55,163:41.88:-79.98,164:41.96:-80.35,165:42.13:-80.09,166:40.51:-78.4,167:40.51:-78.24,168:40.03:-78.81",
+  "169:39.93:-78.62,170:40.27:-76.88,171:40.04:-76.31,172:40.34:-76.42,173:40.04:-76.31,174:40.85:-77.14,175:39.97:-76.73",
+  "176:40.34:-76.42,177:40.4:-77.37,178:41.24:-76.99,179:40.34:-75.93,180:40.6:-75.47,181:40.93:-75.99,182:41.24:-75.88",
+  "183:40.8:-76.83,184:41.41:-75.66,185:41.24:-75.88,186:41.45:-75.66,187:40.6:-75.47,188:40.33:-75.52,189:40.22:-75.55",
+  "190:39.95:-75.17,191:39.95:-75.17,193:40.1:-75.29,194:40.25:-75.28,195:40.6:-75.35,196:39.97:-75.45,197:39.74:-75.55",
+  "198:39.16:-75.52,199:39.74:-75.55,200:38.89:-77.04,201:38.87:-77.15,202:38.89:-77.04,203:38.89:-77.04,204:38.89:-77.04",
+  "205:38.89:-77.04,206:38.53:-76.64,207:38.28:-76.72,208:38.78:-76.74,209:39.29:-76.61,210:39.29:-76.61,211:39.29:-76.61",
+  "212:39.29:-76.61,214:39:-76.61,215:39.53:-76.39,216:39.45:-76.17,217:39.64:-77.72,218:39.47:-77.96,219:39.63:-78.77",
+  "220:38.72:-77.2,221:38.72:-77.2,222:38.85:-77.29,223:38.53:-77.3,224:38.3:-77.46,225:37.54:-77.44,226:37.27:-79.94",
+  "227:37.96:-79.44,228:38.44:-78.87,229:38.03:-78.48,230:37.54:-77.44,231:37.54:-77.44,232:37.54:-77.44,233:36.85:-76.29",
+  "234:36.85:-76.29,235:37.03:-76.35,236:36.73:-76.04,237:36.73:-76.58,238:37.54:-77.44,239:37.04:-76.49,240:37.27:-79.94",
+  "241:37.27:-79.94,242:36.76:-79.87,243:37.27:-80.41,244:38.44:-79.45,245:37.32:-79.47,246:37.78:-80.44,247:37.26:-81.22",
+  "248:36.71:-81.97,249:37.83:-79.44,250:38.35:-81.63,251:38.35:-81.63,252:38.41:-82.43,253:38.73:-82.03,254:37.78:-81.19",
+  "255:38.44:-81,256:38.33:-80.86,257:37.8:-80.45,258:37.78:-81.19,259:39.28:-80.34,260:39.63:-79.96,261:39.27:-81.56",
+  "262:37.82:-80.43,263:38.92:-80.18,264:39.46:-80.14,265:39.35:-80.84,266:38.92:-79.85,267:38.33:-81.63,268:39.46:-79.44",
+  "270:35.78:-78.64,271:36.1:-80.24,272:36.07:-79.79,273:36.07:-79.79,274:36.1:-80.24,275:35.78:-78.64,276:36.07:-79.79",
+  "277:35.23:-80.84,278:35.59:-82.55,279:35.23:-80.84,280:35.23:-80.84,281:35.23:-80.84,282:35.23:-80.84,283:35.23:-80.84",
+  "284:34.23:-77.95,285:35.05:-78.88,286:35.05:-78.88,287:35.38:-77.99,288:35.38:-77.99,289:35.38:-77.99,290:34:-81.03",
+  "291:34:-81.03,292:34:-81.03,293:34.85:-82.4,294:32.78:-79.93,295:33.84:-80.79,296:34.19:-79.76,297:34.85:-82.4",
+  "298:33.48:-80.97,299:32.46:-80.67,300:33.75:-84.39,301:33.75:-84.39,302:33.75:-84.39,303:33.75:-84.39,304:33.95:-83.36",
+  "305:33.47:-82.01,306:33.47:-82.01,307:34.25:-83.5,308:33.47:-82.01,309:32.46:-83.5,310:32.08:-81.09,311:33.75:-84.39",
+  "312:32.08:-81.09,313:32.08:-81.09,314:31.21:-81.5,315:31.58:-84.15,316:31.58:-83.53,317:32.07:-81.09,318:32.46:-83.5",
+  "319:32.46:-83.5,320:30.33:-81.66,321:28.54:-81.38,322:30.33:-81.66,323:28.04:-80.63,324:29.65:-82.32,325:30.44:-84.28",
+  "326:29.19:-82.14,327:28.54:-81.38,328:28.54:-81.38,329:28.54:-81.38,330:25.76:-80.19,331:25.76:-80.19,332:25.76:-80.19",
+  "333:26.12:-80.14,334:26.72:-80.05,335:27.95:-82.46,336:27.95:-82.46,337:27.95:-82.46,338:28.06:-80.62,339:26.14:-80.17",
+  "340:18.34:-64.93,341:27.34:-82.53,342:26.64:-81.87,346:27.95:-82.46,347:28.07:-82.42,349:26.14:-81.79,350:33.52:-86.81",
+  "351:33.52:-86.81,352:33.21:-87.57,354:33.52:-86.81,355:34.73:-86.59,356:34.73:-86.59,357:34.73:-86.59,358:34.73:-86.59",
+  "359:33.21:-87.57,360:32.38:-86.3,361:32.38:-86.3,362:33.45:-85.79,363:33.45:-85.79,364:31.21:-85.36,365:30.69:-88.04",
+  "366:30.69:-88.04,367:32.38:-86.3,368:32.38:-86.3,369:31.33:-87.49,370:36.17:-86.78,371:36.17:-86.78,372:36.17:-86.78",
+  "373:35.05:-85.31,374:35.05:-85.31,375:36.17:-86.78,376:36.55:-82.56,377:35.96:-83.92,378:35.96:-83.92,379:35.05:-85.31",
+  "380:35.15:-90.05,381:35.15:-90.05,382:35.15:-90.05,383:35.61:-88.81,385:35.36:-89.52,386:35.77:-88.4,387:35.84:-86.39",
+  "388:35.83:-88.92,389:35.04:-90,400:38.25:-85.76,401:38.25:-85.76,402:38.25:-85.76,403:37.99:-84.48,404:37.99:-84.48",
+  "405:37.99:-84.48,406:38.05:-84.5,410:39.1:-84.51,411:38.04:-84.5,412:38.04:-84.5,413:38.2:-84.87,414:38.04:-84.5",
+  "420:36.99:-86.44,421:36.99:-86.44,422:37.78:-87.11,423:37.08:-88.69,424:37:-85.93,425:37.99:-84.48,426:37.99:-84.48",
+  "427:37.76:-83.47,430:39.96:-82.99,431:39.96:-82.99,432:39.96:-82.99,433:39.96:-82.99,434:40.8:-81.38,435:40.06:-83",
+  "436:41.65:-83.54,437:41.1:-80.65,438:41.1:-80.65,439:41.1:-80.65,440:41.5:-81.69,441:41.5:-81.69,442:41.07:-81.52",
+  "443:41.07:-81.52,444:41.07:-81.52,445:39.96:-82.99,446:40.8:-81.38,447:40.8:-81.38,448:39.76:-84.19,449:39.76:-84.19",
+  "450:39.1:-84.51,451:39.1:-84.51,452:39.1:-84.51,453:39.76:-84.19,454:39.76:-84.19,455:39.76:-84.19,456:39.33:-82.98",
+  "457:39.33:-82.98,458:40.08:-82.01,459:39.1:-84.51,460:39.77:-86.16,461:39.77:-86.16,462:39.77:-86.16,463:39.77:-86.16",
+  "464:40.46:-86.13,465:39.77:-86.16,466:39.17:-86.53,467:41.07:-85.14,468:40.46:-86.13,469:39.77:-86.16,470:39.1:-84.51",
+  "471:38.29:-85.84,472:39.17:-86.53,473:39.47:-87.41,474:39.17:-86.53,475:39.47:-87.41,476:37.97:-87.57,477:39.17:-86.53",
+  "478:39.47:-87.41,479:38.68:-87.52,480:42.33:-83.05,481:42.33:-83.05,482:42.33:-83.05,483:42.33:-83.05,484:42.97:-83.69",
+  "485:42.97:-83.69,486:43.42:-83.95,487:42.73:-84.56,488:42.73:-84.56,489:42.96:-85.66,490:42.29:-85.59,491:42.96:-85.66",
+  "492:42.29:-85.59,493:43.23:-86.25,494:44.33:-85.58,495:42.96:-85.66,496:44.33:-85.58,497:44.76:-84.73,498:46.49:-87.67",
+  "499:46.49:-87.67,500:41.59:-93.62,501:41.59:-93.62,502:41.59:-93.62,503:41.59:-93.62,504:42.5:-92.34,505:41.66:-91.53",
+  "506:42.5:-92.34,507:42.5:-92.34,508:42.03:-93.47,509:41.59:-93.62,510:42.5:-96.4,511:42.5:-96.4,512:41.26:-95.94",
+  "513:41.26:-95.94,514:41.66:-91.53,515:41.59:-93.62,516:41.59:-93.62,520:41.66:-91.53,521:40.81:-91.11,522:41.66:-91.53",
+  "523:40.81:-91.11,524:42.49:-90.67,525:41.66:-91.53,526:40.81:-91.11,527:41.66:-91.53,528:42.49:-90.67,530:43.07:-89.4",
+  "531:42.73:-87.78,532:43.04:-87.91,534:43.78:-88.43,535:43.07:-89.4,537:43.07:-89.4,538:43.07:-89.4,539:43.07:-89.4",
+  "540:44.94:-89.63,541:44.51:-88.02,542:44.51:-88.02,543:44.51:-88.02,544:44.94:-89.63,545:44.94:-89.63,546:43.81:-91.24",
+  "547:44.81:-91.5,548:44.81:-91.5,549:44.94:-89.63,550:44.98:-93.27,551:44.95:-93.09,553:44.98:-93.27,554:44.98:-93.27",
+  "555:44.98:-93.27,556:46.78:-92.11,557:46.78:-92.11,558:46.78:-92.11,559:44.08:-92.48,560:44.16:-94,561:44.16:-94",
+  "562:44.44:-95.77,563:45.56:-94.16,564:45.56:-94.16,565:47.47:-94.88,566:47.92:-97.03,567:47.47:-94.88,570:43.55:-96.73",
+  "571:43.55:-96.73,572:44.08:-97.14,573:44.37:-100.35,574:45.46:-98.49,575:43.72:-98.03,576:46.88:-96.79,577:44.37:-100.35",
+  "580:46.88:-96.79,581:46.88:-96.79,582:46.88:-96.79,583:48.23:-101.3,584:46.81:-100.78,585:46.81:-100.78,586:48.23:-101.3",
+  "587:48.23:-101.3,588:47.92:-97.03,590:45.78:-108.5,591:45.78:-108.5,592:47.51:-111.29,593:48.55:-109.53,594:47.51:-111.29",
+  "595:45.78:-108.5,596:47.51:-111.29,597:45.78:-108.5,598:46.59:-112.04,599:47.51:-111.29,600:41.88:-87.63,601:41.88:-87.63",
+  "602:42.03:-87.68,603:42.03:-87.68,604:42.1:-87.97,605:41.85:-88.08,606:41.88:-87.63,607:41.88:-87.63,608:41.88:-87.63",
+  "609:41.51:-87.63,610:41.5:-90.58,611:40.69:-89.59,612:40.69:-89.59,613:40.12:-88.24,614:40.12:-88.24,615:40.12:-88.24",
+  "616:40.12:-88.24,617:39.8:-89.65,618:38.63:-90.2,619:38.63:-90.2,620:39.8:-89.65,622:38.63:-90.2,623:38.63:-90.2",
+  "624:38.63:-90.2,625:39.8:-89.65,626:39.8:-89.65,627:39.8:-89.65,628:38.52:-89.98,629:37.72:-89.22,630:38.63:-90.2",
+  "631:38.63:-90.2,633:38.63:-90.2,634:38.63:-90.2,635:38.63:-90.2,636:36.63:-93.24,637:36.63:-93.24,638:36.63:-93.24",
+  "639:36.63:-93.24,640:39.1:-94.58,641:39.1:-94.58,644:39.1:-94.58,645:38.58:-90.24,646:38.58:-90.24,647:38.58:-90.24",
+  "648:38.58:-90.24,649:39.1:-94.58,650:38.58:-92.17,651:38.58:-92.17,652:38.58:-92.17,653:39.12:-93.23,654:37.22:-93.29",
+  "655:37.22:-93.29,656:37.22:-93.29,657:37.22:-93.29,658:39.1:-94.58,660:39.1:-94.58,661:39.1:-94.58,662:39.1:-94.58",
+  "664:38.95:-95.25,665:38.95:-95.25,666:38.95:-95.25,667:37.69:-97.34,668:37.69:-97.34,669:38.87:-99.32,670:37.69:-97.34",
+  "671:37.69:-97.34,672:37.69:-97.34,673:39.04:-95.68,674:38.87:-99.32,675:37.69:-97.34,676:38.87:-99.32,677:38.87:-99.32",
+  "678:38.87:-99.32,679:38.87:-99.32,680:41.26:-95.94,681:41.26:-95.94,683:40.82:-96.71,684:40.82:-96.71,685:40.82:-96.71",
+  "686:40.82:-96.71,687:40.82:-96.71,688:40.87:-98.34,689:40.87:-98.34,690:40.87:-100.65,691:41.87:-103.66,692:41.13:-100.77",
+  "693:41.87:-103.66,700:29.95:-90.07,701:29.95:-90.07,703:29.95:-90.07,704:29.95:-90.07,705:30.22:-92.02,706:30.45:-91.19",
+  "707:30.45:-91.19,708:30.22:-92.02,710:32.51:-93.75,711:32.51:-93.75,712:32.51:-93.75,713:31.31:-92.45,714:32.51:-93.75",
+  "716:32.31:-90.21,717:32.31:-90.21,718:32.31:-90.21,719:32.31:-90.21,720:32.31:-90.21,721:32.31:-90.21,722:34.75:-92.29",
+  "723:34.75:-92.29,724:34.75:-92.29,725:34.75:-92.29,726:36.37:-94.2,727:35.39:-94.4,728:35.39:-94.4,729:35.39:-94.4",
+  "730:35.47:-97.52,731:35.47:-97.52,733:35.22:-97.44,734:36.15:-95.99,735:36.15:-95.99,736:36.15:-95.99,737:36.15:-95.99",
+  "738:35.47:-97.52,739:34.61:-98.39,740:36.15:-95.99,741:36.15:-95.99,743:36.15:-95.99,744:36.15:-95.99,745:35.47:-97.52",
+  "746:36.15:-95.99,747:35.47:-97.52,748:35.47:-97.52,749:35.47:-97.52,750:32.78:-96.8,751:32.78:-96.8,752:32.78:-96.8",
+  "753:32.78:-96.8,754:32.36:-95.3,755:32.36:-95.3,756:31.55:-97.15,757:31.11:-97.73,758:31.55:-97.15,759:31.55:-97.15",
+  "760:32.75:-97.33,761:32.75:-97.33,762:32.78:-96.8,763:33.21:-97.13,764:32.78:-96.8,765:32.78:-96.8,766:33.91:-98.49",
+  "767:33.91:-98.49,768:33.58:-101.85,769:33.58:-101.85,770:29.76:-95.37,771:29.76:-95.37,772:29.76:-95.37,773:29.76:-95.37",
+  "774:29.76:-95.37,775:29.76:-95.37,776:30.27:-94.1,777:30.08:-94.13,778:29.3:-94.8,779:27.8:-97.4,780:29.42:-98.49",
+  "781:29.42:-98.49,782:29.42:-98.49,783:27.8:-97.4,784:27.8:-97.4,785:29.88:-97.94,786:30.27:-97.74,787:30.27:-97.74",
+  "788:29.42:-98.49,789:29.42:-98.49,790:33.58:-101.85,791:35.22:-101.83,792:33.45:-101.85,793:33.45:-101.85",
+  "794:31.76:-106.44,795:31.76:-106.44,796:31.76:-106.44,797:31.76:-106.44,798:31.76:-106.44,799:31.76:-106.44",
+  "800:39.74:-104.98,801:39.74:-104.98,802:39.74:-104.98,803:40.59:-105.08,804:39.74:-104.98,805:39.74:-104.98",
+  "806:39.74:-104.98,807:39.74:-104.98,808:38.83:-104.82,809:38.83:-104.82,810:38.83:-104.82,811:38.25:-104.61",
+  "812:37.27:-107.88,813:37.27:-107.88,814:39.06:-108.55,815:39.06:-108.55,816:39.06:-108.55,820:41.14:-104.82",
+  "821:41.14:-104.82,822:41.14:-104.82,823:42.83:-106.33,824:42.83:-106.33,825:42.87:-106.33,826:42.87:-106.33",
+  "827:44.28:-105.5,828:44.28:-105.5,829:41.31:-105.59,830:42.83:-106.33,831:41.31:-105.59,832:43.48:-110.76",
+  "833:43.48:-110.76,834:43.61:-116.21,835:43.61:-116.21,836:43.61:-116.21,837:43.61:-116.21,838:42.57:-114.46",
+  "840:40.76:-111.89,841:40.76:-111.89,843:40.76:-111.89,844:40.23:-111.66,845:40.76:-111.89,846:40.76:-111.89",
+  "847:40.76:-111.89,850:33.45:-112.07,852:33.45:-112.07,853:33.45:-112.07,855:33.45:-112.07,856:32.22:-110.97",
+  "857:32.22:-110.97,859:34.55:-112.47,860:35.2:-111.65,863:33.45:-112.07,864:32.22:-110.97,865:33.45:-112.07",
+  "870:35.08:-106.65,871:35.08:-106.65,873:35.08:-106.65,874:35.69:-105.94,875:35.08:-106.65,877:32.35:-106.75",
+  "878:32.35:-106.75,879:32.35:-106.75,880:32.35:-106.75,881:33.39:-104.52,882:33.39:-104.52,883:33.39:-104.52",
+  "884:35.08:-106.65,889:36.17:-115.14,890:36.17:-115.14,891:36.17:-115.14,893:39.53:-119.81,894:39.53:-119.81",
+  "895:39.53:-119.81,897:39.53:-119.81,898:40.84:-115.76,900:34.05:-118.24,901:34.05:-118.24,902:33.94:-118.1",
+  "903:33.94:-118.1,904:34.17:-118.45,905:33.77:-118.19,906:33.77:-118.19,907:33.77:-118.19,908:33.77:-118.19",
+  "910:34.05:-118.24,911:34.14:-118.26,912:34.14:-118.26,913:34.2:-118.53,914:34.28:-118.77,915:34.19:-118.13",
+  "916:34.28:-118.77,917:34.1:-117.29,918:34.1:-117.29,919:33.83:-117.92,920:32.72:-117.16,921:32.72:-117.16",
+  "922:33.99:-117.37,923:33.99:-117.37,924:33.99:-117.37,925:33.99:-117.37,926:33.75:-117.87,927:33.75:-117.87",
+  "928:33.99:-117.37,930:34.42:-119.7,931:34.42:-119.7,932:36.75:-119.77,933:35.37:-119.02,934:34.42:-119.7",
+  "935:36.75:-119.77,936:36.75:-119.77,937:36.75:-119.77,938:36.75:-119.77,939:36.97:-121.97,940:37.77:-122.42",
+  "941:37.77:-122.42,942:38.58:-121.49,943:37.55:-122.27,944:37.77:-122.42,945:37.8:-122.27,946:37.8:-122.27",
+  "947:37.88:-122.26,948:37.88:-122.26,949:37.38:-122.08,950:37.34:-121.89,951:37.34:-121.89,952:37.34:-121.89",
+  "953:36.97:-121.97,954:37.55:-122.27,955:40.58:-122.39,956:38.58:-121.49,957:38.58:-121.49,958:38.58:-121.49",
+  "959:38.58:-121.49,960:40.58:-122.39,961:39.53:-122.19,967:21.31:-157.86,968:21.31:-157.86,969:14.27:170.7",
+  "970:45.52:-122.68,971:45.52:-122.68,972:45.52:-122.68,973:44.94:-123.03,974:44.05:-123.09,975:44.05:-123.09",
+  "976:44.62:-121.18,977:44.05:-121.31,978:45.68:-118.79,979:44.06:-121.31,980:47.61:-122.33,981:47.61:-122.33",
+  "982:47.61:-122.33,983:47.25:-122.44,984:47.25:-122.44,985:47.25:-122.44,986:45.64:-122.66,988:46.06:-118.34",
+  "989:46.06:-118.34,990:47.66:-117.43,991:47.66:-117.43,992:47.66:-117.43,993:46.6:-120.51,994:48.75:-122.47",
+  "995:61.22:-149.9,996:61.22:-149.9,997:64.84:-147.72,998:58.3:-134.42,999:55.34:-131.64"
+].join(",");
+const ZIP_PREFIX_CENTROIDS = {};
+ZIP_COMPACT.split(",").forEach(e => { const [p, lat, lon] = e.split(":"); ZIP_PREFIX_CENTROIDS[p] = { lat: +lat, lon: +lon }; });
+
+// ─── COMPREHENSION GATE ───────────────────────────────────────────────────────
+const COMP_QUESTIONS = [
+  { id:"q1", question:"If you witness exploitation or abuse through this network, what should you do?", options:[{key:"a",text:"Flag the post and move on"},{key:"b",text:"Report it to law enforcement or a community safety organization"},{key:"c",text:"Post about it publicly to warn others"}], correct:"b", ref:"On safety: Report it immediately to law enforcement or an appropriate community safety organization." },
+  { id:"q2", question:"Which is considered hate speech under this Covenant?", options:[{key:"a",text:"Disagreeing with someone in a heated argument"},{key:"b",text:"Language that dehumanizes or threatens based on race, religion, gender identity, disability, or immigration status"},{key:"c",text:"Criticizing a political policy"}], correct:"b", ref:"This platform prohibits speech that targets people based on race, color, ethnicity, national origin, religion, sex, gender identity, sexual orientation, disability, or immigration status." },
+  { id:"q3", question:"Which behavior violates this Covenant?", options:[{key:"a",text:"Posting that you need help with groceries"},{key:"b",text:"Offering free tutoring"},{key:"c",text:"Offering excessive help to build dependency or collect personal information"}], correct:"c", ref:"Not to collect their information for any purpose other than the exchange you are making." },
+  { id:"q4", question:"This platform is for:", options:[{key:"a",text:"Buying and selling goods and services"},{key:"b",text:"Neighbors exchanging skills, goods, time, and support directly"},{key:"c",text:"Fundraising and collecting donations"}], correct:"b", ref:"Root System is a community commons — a shared space that belongs to everyone who uses it in good faith." },
+  { id:"q5", question:"Posts on this platform are:", options:[{key:"a",text:"Private and visible only to logged-in members"},{key:"b",text:"Public — anyone with the link can read them"},{key:"c",text:"Encrypted and protected from outside access"}], correct:"b", ref:"Posts on this platform are public. Anyone with the link can read them." },
+];
+
+// ─── COVENANT TEXT ────────────────────────────────────────────────────────────
+const COVENANT_TEXT = [
+  {h:null,b:"Before you use this space, read this. It is short because it means what it says."},
+  {h:null,b:"Root System is a community commons — a shared space that belongs to everyone who uses it in good faith, and to no one who doesn't."},
+  {h:null,b:"There is a human being on the other end of every post. Remember that always. Not a user. Not a handle. A person."},
+  {h:"By entering and posting, you agree:",b:"You are here to help neighbors, share what you have, ask for what you need, and protect everyone in this space. Not to profit from them. Not to exploit them. Not to collect their information."},
+  {h:null,b:"You will meet in public first. You will not pressure anyone, create false urgency, or ask for upfront payment."},
+  {h:null,b:"This space is not a marketplace, a dating platform, a solicitation board, or a dark corner of anything."},
+  {h:null,b:"This space is not for recruitment, sales pitches, or business promotion, including MLM. Offers must be genuine exchanges — not funnels to paid products."},
+  {h:"On hate speech:",b:"This platform prohibits speech that targets people based on race, color, ethnicity, national origin, religion, sex, gender identity, sexual orientation, disability, or immigration status. Dehumanization is not debate."},
+  {h:"On free expression:",b:"This platform will not be used to silence, suppress, dox, or retaliate against legitimate voices — especially those historically suppressed. BIPOC, LGBTQIA+, people with disabilities, and immigrants take space here as policy and values, not tolerance."},
+  {h:"On safety warnings:",b:"Warning the community about someone who harmed you is protected speech. Fabricating accusations is not."},
+  {h:"On prohibited content:",b:"No illegal goods, controlled substances, stolen property, weapons, unlicensed professional services, or sexual services."},
+  {h:"On integrity:",b:"We say what we mean. We do what we say. We correct ourselves when we're wrong."},
+  {h:"On safety:",b:"If you witness exploitation, predatory behavior, trafficking, or abuse — report it immediately to law enforcement or a community safety organization. This commons belongs to all of us."},
+  {h:"On privacy:",b:"Posts are public. Anyone with the link can read them. If you recognize someone from this platform elsewhere — do not reference their presence here without permission."},
+  {h:"On who this is for:",b:"Everyone. Helping your neighbor is not an ideology. It is older than any movement that has tried to claim it. This platform was created in good faith, given away freely, and governed by its communities."},
+  {h:null,b:"Keep the good faith of it intact."},
+];
+
+// ─── SEED DATA ────────────────────────────────────────────────────────────────
+const SEED_POSTS = [
+  { id:"s1",type:"offer",category:"skills",title:"Basic plumbing repairs — I'll teach, not just fix",body:"12 years fixing things. Happy to walk you through it.",contactInfo:"rootsystem@proton.me",zone:"Any / Network-wide",timebank:1,handle:"M. Calloway",deviceId:"seed",created:"2025-02-10",expires:"2099-12-31",tags:["plumbing","teaching"],flags:0,flaggedBy:[],status:"active",zip:"" },
+  { id:"s2",type:"need",category:"goods",title:"Seeking: working sewing machine",body:"Learning to mend instead of buy. Any condition. Can trade childcare hours.",contactInfo:"Text 555-0101",zone:"South Side",timebank:0,handle:"Rosa M.",deviceId:"seed",created:"2025-02-13",expires:"2099-12-31",tags:["sewing","trade"],flags:0,flaggedBy:[],status:"active",zip:"" },
+  { id:"s3",type:"offer",category:"knowledge",title:"Guide: Food preservation without special equipment",body:"Fermentation, lacto pickling, salt-packing, root cellaring. No canning required.",contactInfo:"commons@proton.me",zone:"Any / Network-wide",timebank:0,handle:"Ferment Collective",deviceId:"seed",created:"2025-02-15",expires:"2099-12-31",tags:["food","preservation"],flags:0,flaggedBy:[],status:"active",zip:"" },
+  { id:"s4",type:"need",category:"labor",title:"Displaced — looking for day labor connections",body:"Was logistics, laid off. Reliable, licensed driver.",contactInfo:"Ask for Darnell via network email",zone:"East End",timebank:0,handle:"Darnell T.",deviceId:"seed",created:"2025-02-18",expires:"2099-12-31",tags:["labor","work","driver"],flags:0,flaggedBy:[],status:"active",zip:"" },
+  { id:"s5",type:"offer",category:"care",title:"Childcare exchange — 2 kids, flexible hours",body:"Two parents, flexible schedules. Looking to build a care pod.",contactInfo:"Signal preferred",zone:"West End",timebank:2,handle:"The Oduya-Park Family",deviceId:"seed",created:"2025-02-20",expires:"2099-12-31",tags:["childcare","exchange"],flags:0,flaggedBy:[],status:"active",zip:"" },
+  { id:"s6",type:"free",freeSubtype:"knowledge",category:"skills",title:"Free: Beginner bike repair — bring yours",body:"Every Saturday at community center. Tools provided.",contactInfo:"bikefix@proton.me",zone:"Downtown",timebank:0,handle:"WheelHouse Collective",deviceId:"seed",created:"2025-02-22",expires:"2099-12-31",tags:["bikes","repair","free"],flags:0,flaggedBy:[],status:"active",zip:"" },
+];
+const SEED_COALITIONS = [{ id:"c1",title:"Mutual Aid Kitchen Collective",purpose:"Cooking in bulk for families navigating job loss. Meets Sundays.",members:["Ana K.","Bridget W.","Lupe R.","Moses A."],contact:"kitchen@collective.net",zone:"Any / Network-wide",created:"2025-02-12" }];
+
+// ─── UTILITIES ────────────────────────────────────────────────────────────────
+function gid() { return Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
+function fmt(d) { return new Date(d).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}); }
+function clampTrust(s) { return Math.max(TRUST.FLOOR,Math.min(TRUST.CEILING,s)); }
+function countInWindow(ts,w) { const c=Date.now()-w; return ts.filter(t=>t>c).length; }
+function pruneOld(ts,w) { const c=Date.now()-w; return ts.filter(t=>t>c); }
+function daysUntilExpiry(created) { const e=new Date(created); e.setDate(e.getDate()+RATE.EXPIRY_DAYS); return Math.ceil((e-new Date())/86400000); }
+function isExpired(p) { if(p.id?.startsWith("s")||p.expires==="2099-12-31") return false; return daysUntilExpiry(p.created)<=0; }
+function expiryLabel(p) { if(p.id?.startsWith("s")||p.expires==="2099-12-31") return null; const d=daysUntilExpiry(p.created); if(d<=0) return S.expiration.expired; if(d<=1) return S.expiration.today; return S.expiration.daysLeft(d); }
+function haversine(lat1,lon1,lat2,lon2) { const R=3959,dLat=(lat2-lat1)*Math.PI/180,dLon=(lon2-lon1)*Math.PI/180; const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2; return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a)); }
+function distLabel(mi) { if(mi==null||isNaN(mi)) return null; if(mi<1) return "~<1 mi"; if(mi<50) return `~${Math.round(mi)} mi`; return "~50+ mi"; }
+function appealDaysLeft(a) { const exp=new Date(a.created); exp.setDate(exp.getDate()+RATE.APPEAL_EXPIRY_DAYS); return Math.ceil((exp-new Date())/86400000); }
+
+async function lookupZip(zip) {
+  try { const c=new AbortController(); const t=setTimeout(()=>c.abort(),3000); const r=await fetch(`https://api.zippopotam.us/us/${zip}`,{signal:c.signal}); clearTimeout(t); if(r.ok){const d=await r.json(); if(d.places?.length) return {lat:+d.places[0].latitude,lon:+d.places[0].longitude,city:d.places[0]["place name"],state:d.places[0]["state abbreviation"]};} } catch{}
+  const e=ZIP_PREFIX_CENTROIDS[zip.slice(0,3)]; return e?{lat:e.lat,lon:e.lon,city:null,state:null}:null;
+}
+
+// ─── STORAGE ──────────────────────────────────────────────────────────────────
+async function pGet(k){try{const r=await window.storage.get(k,false);return r?.value?JSON.parse(r.value):null}catch{return null}}
+async function pSet(k,v){try{await window.storage.set(k,JSON.stringify(v),false)}catch(e){console.error("pSet:",k,e)}}
+async function sGet(k){try{const r=await window.storage.get(k,true);return r?.value?JSON.parse(r.value):null}catch{return null}}
+async function sSet(k,v){try{await window.storage.set(k,JSON.stringify(v),true)}catch(e){console.error("sSet:",k,e)}}
+async function sDel(k){try{await window.storage.delete(k,true)}catch(e){console.error("sDel:",k,e)}}
+async function sList(p){try{const r=await window.storage.list(p,true);return r?.keys||[]}catch{return[]}}
+async function getOrCreateDeviceId(){let d=await pGet("device-id");if(d?.id)return d;const n={id:crypto.randomUUID(),created:Date.now()};await pSet("device-id",n);return n}
+async function getTrustData(){const d=await pGet("trust-data");return d||{score:TRUST.STARTING,history:[]}}
+async function adjustTrust(delta,event){const td=await getTrustData();td.score=clampTrust(td.score+delta);td.history.push({event,delta,timestamp:Date.now()});await pSet("trust-data",td);return td.score}
+
+// ─── CSS ──────────────────────────────────────────────────────────────────────
+const css = `
+:root{--deep:#0b1209;--forest:#141e12;--canopy:#1c2a1a;--bark:#2a1c0e;--parchment:#ede0ba;--aged:#c9b47a;--gold:#c4982e;--gold-light:#e0bb60;--botanical:#3d6b2e;--sage:#5e8a4a;--moss:#2e4a22;--mauve:#7a4a8a;--cosmos:#4a3a72;--lavender:#b09acc;--burgundy:#5e1520;--wine:#8a2535;--moonsilver:#c8d0c0;--ink:#0a0f09}
+*{box-sizing:border-box;margin:0;padding:0}body{background:var(--deep)}
+.skip-link{position:absolute;top:-100px;left:1rem;background:var(--gold);color:var(--ink);padding:.5rem 1rem;z-index:200;font-family:'Crimson Text',serif;font-size:.9rem;text-decoration:none;border-radius:0 0 4px 4px;transition:top .2s}.skip-link:focus{top:0}
+*:focus-visible{outline:2px solid var(--gold-light);outline-offset:2px}
+@keyframes shimmer{0%{opacity:.6}50%{opacity:1}100%{opacity:.6}}@keyframes unfurl{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}@keyframes fadeIn{from{opacity:0}to{opacity:1}}@keyframes sealAppear{0%{opacity:0;transform:scale(.8) rotate(-5deg)}60%{transform:scale(1.05) rotate(1deg)}100%{opacity:1;transform:scale(1) rotate(0)}}
+.root{min-height:100vh;background:var(--deep);background-image:radial-gradient(ellipse at 15% 30%,rgba(74,58,114,.12) 0%,transparent 55%),radial-gradient(ellipse at 85% 70%,rgba(61,107,46,.1) 0%,transparent 55%),radial-gradient(ellipse at 50% 10%,rgba(94,21,32,.08) 0%,transparent 40%);color:var(--parchment);font-family:'Crimson Text',Georgia,serif;font-size:16px;line-height:1.6}
+.header{position:relative;padding:2.5rem 2rem 1.5rem;border-bottom:1px solid rgba(196,152,46,.3);background:linear-gradient(180deg,rgba(10,15,9,.95) 0%,transparent 100%);display:flex;flex-direction:column;align-items:center;text-align:center;gap:.5rem}
+.header-eyebrow{font-family:'Cormorant Garamond',serif;font-size:.65rem;letter-spacing:.55em;color:var(--sage);text-transform:uppercase}
+.header-title{font-family:'Cormorant Garamond',serif;font-size:clamp(2.8rem,6vw,4.5rem);font-weight:300;font-style:italic;color:var(--parchment);line-height:1;letter-spacing:.03em}.header-title span{color:var(--gold)}
+.header-subtitle{font-family:'Cormorant Garamond',serif;font-size:.7rem;letter-spacing:.4em;color:var(--aged);text-transform:uppercase}
+.vine-divider{color:var(--botanical);font-size:1.1rem;letter-spacing:.5rem;animation:shimmer 4s ease-in-out infinite;margin:.25rem 0}
+.nav{display:flex;justify-content:center;flex-wrap:wrap;gap:0;border-bottom:1px solid rgba(196,152,46,.2);background:rgba(10,15,9,.8);padding:0 1rem}
+.nav-btn{padding:.85rem 1.2rem;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--aged);cursor:pointer;font-family:'Cormorant Garamond',serif;font-size:.8rem;letter-spacing:.18em;text-transform:uppercase;transition:all .2s;min-height:44px;position:relative}
+.nav-btn:hover{color:var(--parchment)}.nav-btn.active{color:var(--gold-light);border-bottom-color:var(--gold)}
+.nav-dot{display:inline-block;width:4px;height:4px;border-radius:50%;background:var(--wine);margin-left:.4rem;vertical-align:middle}
+.nav-count{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;border-radius:50%;background:var(--wine);color:var(--parchment);font-size:.55rem;margin-left:.3rem;padding:0 3px;font-style:normal;letter-spacing:0}
+.main{max-width:1160px;margin:0 auto;padding:2rem 1.5rem 4rem}.main:focus{outline:none}
+.section-label{display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;font-family:'Cormorant Garamond',serif;font-size:.65rem;letter-spacing:.45em;color:var(--sage);text-transform:uppercase}.section-label::before,.section-label::after{content:'';flex:1;height:1px;background:linear-gradient(90deg,transparent,rgba(94,138,74,.4),transparent)}
+.filters{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin-bottom:1.5rem;padding-bottom:1.5rem;border-bottom:1px solid rgba(196,152,46,.1)}
+.chip{padding:.2rem .8rem;border:1px solid rgba(196,152,46,.2);background:transparent;color:var(--aged);cursor:pointer;font-family:'Cormorant Garamond',serif;font-size:.75rem;letter-spacing:.15em;text-transform:uppercase;border-radius:50px;transition:all .15s;font-style:italic;min-height:44px;display:inline-flex;align-items:center}
+.chip:hover{border-color:rgba(196,152,46,.5);color:var(--parchment)}.chip.active{background:rgba(196,152,46,.12);border-color:var(--gold);color:var(--gold-light)}
+.chip.type-offer.active{background:rgba(61,107,46,.15);border-color:var(--sage);color:#8acc70}.chip.type-need.active{background:rgba(138,37,53,.15);border-color:var(--wine);color:#e08090}.chip.type-free.active{background:rgba(196,152,46,.15);border-color:var(--gold);color:var(--gold-light)}
+.search-input{background:rgba(255,255,255,.03);border:1px solid rgba(196,152,46,.2);border-radius:50px;color:var(--parchment);padding:.25rem 1rem;font-size:.85rem;font-family:'Crimson Text',serif;outline:none;width:180px;min-height:44px;transition:border-color .2s}.search-input:focus{border-color:rgba(196,152,46,.5)}.search-input::placeholder{color:var(--moss)}
+.card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:1.25rem;animation:unfurl .4s ease}
+.card{position:relative;padding:1.4rem 1.3rem 1.2rem;border:1px solid rgba(196,152,46,.15);background:linear-gradient(135deg,rgba(28,42,26,.7) 0%,rgba(20,30,18,.8) 100%);transition:border-color .2s,transform .2s;overflow:hidden}
+.card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--gold),transparent);opacity:0;transition:opacity .3s}
+.card:hover{border-color:rgba(196,152,46,.35);transform:translateY(-1px)}.card:hover::before{opacity:1}
+.card.offer{border-color:rgba(61,107,46,.25);background:linear-gradient(135deg,rgba(22,40,16,.75) 0%,rgba(14,24,12,.85) 100%)}.card.offer::before{background:linear-gradient(90deg,transparent,var(--sage),transparent)}
+.card.need{border-color:rgba(138,37,53,.25);background:linear-gradient(135deg,rgba(40,16,20,.75) 0%,rgba(24,10,14,.85) 100%)}.card.need::before{background:linear-gradient(90deg,transparent,var(--wine),transparent)}
+.card.free{border-color:rgba(196,152,46,.3);background:linear-gradient(135deg,rgba(30,28,16,.75) 0%,rgba(20,18,10,.85) 100%)}.card.free::before{background:linear-gradient(90deg,transparent,var(--gold-light),transparent);opacity:.4}
+.card.flagged{border-color:rgba(200,100,0,.4)!important}
+.card-corner{position:absolute;top:.4rem;right:.4rem;font-size:.7rem;opacity:.3;pointer-events:none}
+.card-type-badge{font-family:'Cormorant Garamond',serif;font-size:.6rem;letter-spacing:.4em;text-transform:uppercase;margin-bottom:.5rem;display:flex;align-items:center;gap:.5rem}
+.badge-offer{color:var(--sage)}.badge-need{color:#c07080}.badge-free{color:var(--gold-light)}
+.card-title{font-family:'Cormorant Garamond',serif;font-size:1.15rem;font-weight:600;color:var(--parchment);margin-bottom:.6rem;line-height:1.3}
+.card-body{font-size:.9rem;color:#b8aa88;line-height:1.65;margin-bottom:.75rem}
+.card-zone{font-family:'Cormorant Garamond',serif;font-size:.7rem;color:var(--mauve);letter-spacing:.1em;margin-bottom:.5rem;font-style:italic}
+.card-meta{display:flex;justify-content:space-between;align-items:center;font-size:.68rem;color:#504838;margin-top:.4rem;flex-wrap:wrap;gap:.3rem}
+.card-tags{display:flex;flex-wrap:wrap;gap:.2rem;margin-top:.4rem}
+.tag{font-family:'Cormorant Garamond',serif;font-size:.65rem;padding:.05rem .45rem;border:1px solid rgba(94,138,74,.2);color:var(--moss);border-radius:50px;font-style:italic}
+.tb-badge{background:rgba(196,152,46,.1);border:1px solid rgba(196,152,46,.3);color:var(--gold);padding:.05rem .5rem;font-size:.65rem;font-family:'Cormorant Garamond',serif;border-radius:50px;letter-spacing:.1em}
+.trust-badge{font-size:.62rem;color:var(--mauve);font-family:'Cormorant Garamond',serif;font-style:italic;cursor:pointer;border-bottom:1px dotted rgba(122,74,138,.3)}.trust-badge:hover{color:var(--lavender)}
+.distance-badge{font-size:.62rem;color:var(--sage);font-family:'Cormorant Garamond',serif;font-style:italic;padding:.05rem .4rem;border:1px solid rgba(94,138,74,.2);border-radius:50px}
+.expiry-badge{font-size:.6rem;font-family:'Cormorant Garamond',serif;font-style:italic;padding:.05rem .4rem;border:1px solid rgba(196,152,46,.2);border-radius:50px;color:#806838}.expiry-badge.urgent{color:#c07050;border-color:rgba(200,100,50,.3)}
+.renew-btn{background:none;border:1px solid rgba(196,152,46,.25);color:var(--aged);cursor:pointer;font-size:.6rem;padding:.1rem .4rem;font-family:'Cormorant Garamond',serif;border-radius:50px;transition:all .2s;min-height:44px;display:inline-flex;align-items:center}.renew-btn:hover{background:rgba(196,152,46,.1);color:var(--gold-light)}
+.free-badge{display:inline-flex;align-items:center;gap:.3rem;background:rgba(196,152,46,.08);border:1px solid rgba(196,152,46,.25);color:var(--gold-light);padding:.05rem .5rem;font-size:.65rem;font-family:'Cormorant Garamond',serif;border-radius:50px;letter-spacing:.1em;font-style:italic}
+.scam-warning{padding:.4rem .75rem;background:rgba(196,120,0,.08);border:1px solid rgba(196,120,0,.25);color:#d4904a;font-size:.78rem;font-style:italic;margin-top:.4rem;line-height:1.5;font-family:'Crimson Text',serif;animation:fadeIn .3s ease;display:flex;justify-content:space-between;align-items:flex-start;gap:.5rem}
+.scam-warning-dismiss{background:none;border:none;color:#806030;cursor:pointer;font-size:.7rem;padding:.1rem;font-family:'Cormorant Garamond',serif;flex-shrink:0;min-width:20px;min-height:20px}
+.card-actions{display:flex;gap:.4rem;align-items:center}
+.action-btn{background:none;border:1px solid transparent;color:#3a2a2a;cursor:pointer;font-size:.65rem;padding:.2rem .5rem;font-family:'Cormorant Garamond',serif;border-radius:50px;transition:all .2s;letter-spacing:.1em;min-height:44px;min-width:44px;display:inline-flex;align-items:center;justify-content:center}
+.action-btn:hover{color:#c07050;border-color:rgba(200,100,50,.3)}.action-btn.flagged-state{color:#c07050}.action-btn.delete-action:hover{color:var(--wine)}.action-btn.block-action:hover{color:var(--mauve)}
+.contact-reveal-btn{background:rgba(61,107,46,.1);border:1px solid rgba(61,107,46,.3);color:var(--sage);cursor:pointer;font-size:.8rem;padding:.4rem .85rem;font-family:'Cormorant Garamond',serif;border-radius:50px;transition:all .2s;font-style:italic;letter-spacing:.1em;min-height:44px;display:inline-flex;align-items:center;gap:.4rem;margin-top:.5rem}.contact-reveal-btn:hover{background:rgba(61,107,46,.2);color:var(--parchment)}
+.match-banner{font-family:'Cormorant Garamond',serif;font-size:.7rem;color:var(--gold);font-style:italic;letter-spacing:.1em;padding:.2rem 0;border-top:1px solid rgba(196,152,46,.15);margin-top:.4rem}
+.form-wrap{max-width:620px;animation:unfurl .35s ease}
+.form-title{font-family:'Cormorant Garamond',serif;font-size:2rem;font-weight:300;font-style:italic;color:var(--parchment);margin-bottom:.2rem}
+.form-desc{font-size:.88rem;color:#907a50;line-height:1.7;margin-bottom:1.5rem}
+.compact-box{border:1px solid rgba(196,152,46,.25);padding:1rem 1.2rem;margin-bottom:1.5rem;background:rgba(196,152,46,.04);border-radius:2px}
+.compact-title{font-family:'Cormorant Garamond',serif;font-size:.65rem;letter-spacing:.4em;text-transform:uppercase;color:var(--gold);margin-bottom:.6rem}
+.compact-rules{font-size:.82rem;color:#a09060;line-height:1.8;list-style:none}.compact-rules li{margin-bottom:.25rem;padding-left:.5rem}.compact-rules li::before{content:'—';margin-right:.4rem;color:var(--moss)}
+.privacy-warning{padding:.6rem 1rem;font-size:.8rem;color:var(--moonsilver);font-style:italic;border-left:2px solid rgba(200,208,192,.3);margin-bottom:1.5rem;line-height:1.6}
+.field-label{display:block;font-family:'Cormorant Garamond',serif;font-size:.65rem;letter-spacing:.35em;color:var(--sage);text-transform:uppercase;margin-bottom:.35rem;margin-top:1.1rem}
+.field-hint{font-size:.75rem;color:#504838;font-style:italic;margin-top:.15rem}
+.form-input,.form-textarea,.form-select{width:100%;background:rgba(255,255,255,.03);border:1px solid rgba(196,152,46,.2);color:var(--parchment);padding:.6rem .85rem;font-size:.92rem;font-family:'Crimson Text',serif;outline:none;transition:border-color .2s;border-radius:1px;min-height:44px}
+.form-input:focus,.form-textarea:focus,.form-select:focus{border-color:rgba(196,152,46,.5);background:rgba(255,255,255,.04)}
+.form-textarea{resize:vertical;min-height:100px;line-height:1.6}.form-select{background-color:#101809}.form-select option{background:#101809}
+.type-toggle{display:flex;gap:0;margin-top:.35rem}
+.type-btn{flex:1;padding:.55rem;border:1px solid rgba(196,152,46,.15);background:transparent;color:#504838;cursor:pointer;font-family:'Cormorant Garamond',serif;font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;font-style:italic;transition:all .2s;min-height:44px}
+.type-btn.offer.active{background:rgba(61,107,46,.2);border-color:var(--sage);color:#8acc70}.type-btn.need.active{background:rgba(138,37,53,.2);border-color:var(--wine);color:#e08090}.type-btn.free-type.active{background:rgba(196,152,46,.12);border-color:var(--gold);color:var(--gold-light)}
+.free-sub-toggle{display:flex;gap:.4rem;margin-top:.35rem;flex-wrap:wrap}
+.free-sub-btn{padding:.4rem .8rem;border:1px solid rgba(196,152,46,.15);background:transparent;color:#504838;cursor:pointer;font-family:'Cormorant Garamond',serif;font-size:.7rem;font-style:italic;border-radius:50px;transition:all .2s;min-height:44px;display:inline-flex;align-items:center}.free-sub-btn.active{background:rgba(196,152,46,.12);border-color:var(--gold);color:var(--gold-light)}
+.rate-limit-footer{font-size:.72rem;color:#504838;font-style:italic;margin-top:.5rem;font-family:'Cormorant Garamond',serif}
+.submit-btn{margin-top:1.75rem;padding:.8rem 2.5rem;background:transparent;border:1px solid var(--gold);color:var(--gold-light);cursor:pointer;font-family:'Cormorant Garamond',serif;font-size:.85rem;letter-spacing:.35em;text-transform:uppercase;font-style:italic;transition:all .25s;border-radius:1px;min-height:44px}.submit-btn:hover{background:rgba(196,152,46,.12);color:var(--parchment)}.submit-btn:disabled{opacity:.3;cursor:not-allowed}
+.success-msg{padding:.8rem 1rem;background:rgba(61,107,46,.12);border:1px solid rgba(61,107,46,.4);color:#8acc70;font-family:'Cormorant Garamond',serif;font-style:italic;font-size:.95rem;margin:1rem 0;animation:fadeIn .3s ease}
+.warning-msg{padding:.8rem 1rem;background:rgba(196,120,0,.1);border:1px solid rgba(196,120,0,.35);color:#d4904a;font-size:.85rem;margin:.75rem 0;font-style:italic}
+.error-msg{padding:.8rem 1rem;background:rgba(138,37,53,.12);border:1px solid rgba(138,37,53,.35);color:#e08090;font-size:.85rem;margin:.75rem 0;font-style:italic}
+.zip-bar{display:flex;align-items:center;gap:.75rem;padding:.5rem 0;margin-bottom:.5rem;flex-wrap:wrap}
+.zip-input-sm{background:rgba(255,255,255,.03);border:1px solid rgba(196,152,46,.2);border-radius:50px;color:var(--parchment);padding:.25rem .75rem;font-size:.85rem;font-family:'Crimson Text',serif;outline:none;width:100px;min-height:44px;text-align:center;letter-spacing:.1em}.zip-input-sm:focus{border-color:rgba(196,152,46,.5)}.zip-input-sm::placeholder{color:var(--moss);font-size:.75rem}
+.zip-label{font-family:'Cormorant Garamond',serif;font-size:.7rem;color:var(--sage);font-style:italic;letter-spacing:.1em}
+.zip-set{font-family:'Cormorant Garamond',serif;font-size:.7rem;color:var(--aged);font-style:italic}
+.zip-change-btn{background:none;border:none;color:var(--moss);cursor:pointer;font-family:'Cormorant Garamond',serif;font-size:.65rem;font-style:italic;text-decoration:underline;padding:.1rem .3rem;min-height:44px;display:inline-flex;align-items:center}
+.tb-grid{display:grid;grid-template-columns:1fr 1.4fr;gap:2.5rem}@media(max-width:700px){.tb-grid{grid-template-columns:1fr}}
+.tb-stat{padding:1.2rem;border:1px solid rgba(196,152,46,.15);text-align:center;margin-bottom:1rem;background:rgba(196,152,46,.03)}
+.tb-stat-num{font-family:'Cormorant Garamond',serif;font-size:3rem;font-weight:300;color:var(--gold);display:block;line-height:1;margin-bottom:.25rem}
+.tb-stat-label{font-family:'Cormorant Garamond',serif;font-size:.6rem;letter-spacing:.35em;color:#504838;text-transform:uppercase}
+.tb-entry{padding:.75rem 0;border-bottom:1px solid rgba(196,152,46,.08);animation:unfurl .3s ease}
+.tb-entry-main{font-family:'Cormorant Garamond',serif;font-size:1rem;color:var(--aged)}
+.tb-entry-sub{font-size:.75rem;color:#504838;margin-top:.15rem;font-style:italic}
+.coalition-card{border:1px solid rgba(122,74,138,.25);padding:1.3rem;background:linear-gradient(135deg,rgba(30,20,45,.7) 0%,rgba(18,12,28,.85) 100%);margin-bottom:1rem;transition:border-color .2s}.coalition-card:hover{border-color:rgba(176,154,204,.35)}
+.coalition-title{font-family:'Cormorant Garamond',serif;font-size:1.2rem;font-weight:600;color:var(--lavender);margin-bottom:.4rem}
+.coalition-meta{font-size:.75rem;color:var(--mauve);font-style:italic;margin-bottom:.6rem}
+.coalition-body{font-size:.88rem;color:#a090b8;line-height:1.65}
+.coalition-members{margin-top:.75rem;display:flex;flex-wrap:wrap;gap:.4rem}
+.member-chip{font-size:.7rem;padding:.1rem .5rem;border:1px solid rgba(122,74,138,.3);color:var(--mauve);border-radius:50px;font-style:italic;font-family:'Cormorant Garamond',serif}
+.appeal-card{border:1px solid rgba(196,120,0,.25);padding:1.3rem;background:linear-gradient(135deg,rgba(40,30,12,.7) 0%,rgba(20,16,8,.85) 100%);margin-bottom:1rem;animation:unfurl .35s ease}
+.appeal-header{font-family:'Cormorant Garamond',serif;font-size:1rem;font-weight:600;color:var(--aged);margin-bottom:.3rem}
+.appeal-original{font-size:.85rem;color:#806838;line-height:1.6;padding:.6rem;background:rgba(196,152,46,.04);border-left:2px solid rgba(196,152,46,.15);margin:.5rem 0}
+.appeal-text{font-size:.88rem;color:var(--aged);font-style:italic;line-height:1.6;margin:.5rem 0}
+.appeal-meta{font-size:.68rem;color:#504838;margin-top:.5rem}
+.appeal-votes{display:flex;gap:.5rem;margin-top:.75rem}
+.vote-btn{padding:.4rem 1rem;border:1px solid rgba(196,152,46,.2);background:transparent;color:var(--aged);cursor:pointer;font-family:'Cormorant Garamond',serif;font-size:.75rem;letter-spacing:.15em;border-radius:50px;transition:all .2s;min-height:44px;display:inline-flex;align-items:center;gap:.3rem}
+.vote-btn:hover{border-color:rgba(196,152,46,.5);color:var(--parchment)}.vote-btn:disabled{opacity:.3;cursor:not-allowed}
+.vote-btn.restore{border-color:rgba(61,107,46,.3)}.vote-btn.restore:hover{background:rgba(61,107,46,.1);color:#8acc70}
+.vote-btn.uphold{border-color:rgba(138,37,53,.3)}.vote-btn.uphold:hover{background:rgba(138,37,53,.1);color:#e08090}
+.vote-counts{font-size:.65rem;color:#504838;font-family:'Cormorant Garamond',serif}
+.trust-modal-score{font-family:'Cormorant Garamond',serif;font-size:2.5rem;font-weight:300;color:var(--gold);text-align:center;margin:.5rem 0}
+.trust-modal-rules{font-size:.82rem;color:#907a50;line-height:1.8;list-style:none;margin:.75rem 0}.trust-modal-rules li{padding:.15rem 0}
+.trust-history{margin-top:1rem;border-top:1px solid rgba(196,152,46,.1);padding-top:.75rem}
+.trust-event{font-size:.78rem;color:#504838;padding:.25rem 0;border-bottom:1px solid rgba(196,152,46,.05);display:flex;justify-content:space-between}
+.trust-event-delta{font-family:'Cormorant Garamond',serif;font-weight:600}.trust-delta-pos{color:#8acc70}.trust-delta-neg{color:#e08090}
+.safety-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1.25rem}
+.safety-card{padding:1.4rem;border:1px solid rgba(196,152,46,.15);background:rgba(20,16,10,.5)}
+.safety-icon{font-size:1.6rem;margin-bottom:.6rem;display:block}
+.safety-title{font-family:'Cormorant Garamond',serif;font-size:1.05rem;font-weight:600;color:var(--parchment);margin-bottom:.5rem}
+.safety-body{font-size:.85rem;color:#907a50;line-height:1.75;list-style:none}.safety-body li{margin-bottom:.3rem;padding-left:.5rem}.safety-body li::before{content:'—';margin-right:.4rem;color:var(--moss)}
+.safety-critical{border-color:rgba(200,80,60,.3);background:rgba(60,12,12,.5)}.safety-critical .safety-title{color:#e09080}
+.red-flag-box{border:1px solid rgba(180,60,60,.35);padding:1.2rem;background:rgba(50,12,12,.4);margin-top:1.5rem}
+.red-flag-title{font-family:'Cormorant Garamond',serif;font-size:.65rem;letter-spacing:.4em;text-transform:uppercase;color:#c06060;margin-bottom:.75rem}
+.red-flag-list{font-size:.85rem;color:#a07070;line-height:1.8;list-style:none}.red-flag-list li{margin-bottom:.2rem;padding-left:.5rem}.red-flag-list li::before{content:'—';margin-right:.4rem;color:#6a3030}
+.resource-list{list-style:none}.resource-list li{padding:.5rem 0;border-bottom:1px solid rgba(196,152,46,.08);font-size:.85rem;color:#907a50}.resource-list li strong{color:var(--aged)}
+.manifesto-drop{border-left:2px solid var(--gold);padding:1.2rem 1.8rem;margin-bottom:2rem;background:rgba(196,152,46,.04);font-family:'IM Fell DW Pica',serif;font-style:italic;font-size:1.15rem;color:var(--aged);line-height:1.7}
+.about-h{font-family:'Cormorant Garamond',serif;font-size:1.3rem;font-weight:600;color:var(--parchment);margin-top:1.75rem;margin-bottom:.5rem}
+.about-p{font-size:.92rem;color:#907a50;line-height:1.8;max-width:640px}
+.covenant-overlay{position:fixed;inset:0;background:rgba(5,8,4,.96);z-index:150;display:flex;align-items:flex-start;justify-content:center;padding:2rem 1rem;overflow-y:auto;animation:fadeIn .4s ease}
+.covenant-card{background:linear-gradient(160deg,#1a2416 0%,#12180f 100%);border:1px solid rgba(196,152,46,.35);max-width:680px;width:100%;padding:2.5rem 2.5rem 2rem;position:relative;margin:1rem auto}.covenant-card::before{content:'';position:absolute;inset:4px;border:1px solid rgba(196,152,46,.12);pointer-events:none}
+.covenant-header{font-family:'Cormorant Garamond',serif;font-size:2rem;font-weight:300;font-style:italic;color:var(--parchment);text-align:center;margin-bottom:.25rem}.covenant-header span{color:var(--gold)}
+.covenant-vine{text-align:center;color:var(--botanical);font-size:.9rem;letter-spacing:.4rem;margin-bottom:1.5rem;animation:shimmer 4s ease-in-out infinite}
+.covenant-minor-notice{padding:1rem;border:1px solid rgba(176,154,204,.3);background:rgba(74,58,114,.1);color:var(--lavender);font-size:.85rem;line-height:1.7;margin-bottom:1.5rem;font-style:italic}
+.covenant-body{max-height:45vh;overflow-y:auto;padding-right:.5rem;margin-bottom:1.5rem;scroll-behavior:smooth}.covenant-body::-webkit-scrollbar{width:4px}.covenant-body::-webkit-scrollbar-track{background:rgba(196,152,46,.05)}.covenant-body::-webkit-scrollbar-thumb{background:rgba(196,152,46,.2);border-radius:2px}
+.covenant-section{margin-bottom:1rem}.covenant-section-heading{font-family:'Cormorant Garamond',serif;font-size:1rem;font-weight:600;color:var(--gold-light);margin-bottom:.3rem}
+.covenant-section-body{font-family:'Crimson Text',serif;font-size:.9rem;color:#a09060;line-height:1.8}
+.covenant-scroll-indicator{text-align:center;font-size:.7rem;color:var(--moss);font-style:italic;margin-bottom:1rem;font-family:'Cormorant Garamond',serif;letter-spacing:.15em}
+.covenant-checkbox-area{border-top:1px solid rgba(196,152,46,.15);padding-top:1rem;margin-bottom:1rem}
+.covenant-check-row{display:flex;align-items:flex-start;gap:.75rem;margin-bottom:.75rem;cursor:pointer;min-height:44px}
+.covenant-check-row input[type="checkbox"]{width:18px;height:18px;margin-top:2px;accent-color:var(--gold);flex-shrink:0;cursor:pointer}
+.covenant-check-label{font-family:'Crimson Text',serif;font-size:.9rem;color:var(--aged);line-height:1.5;cursor:pointer}
+.comp-gate{border-top:1px solid rgba(196,152,46,.15);padding-top:1rem;animation:unfurl .35s ease}
+.comp-label{font-family:'Cormorant Garamond',serif;font-size:.6rem;letter-spacing:.4em;text-transform:uppercase;color:var(--sage);margin-bottom:.75rem}
+.comp-question{font-family:'Crimson Text',serif;font-size:.95rem;color:var(--parchment);margin-bottom:.75rem;line-height:1.5}
+.comp-option{display:block;width:100%;text-align:left;padding:.6rem 1rem;background:rgba(255,255,255,.02);border:1px solid rgba(196,152,46,.15);color:var(--aged);cursor:pointer;font-family:'Crimson Text',serif;font-size:.88rem;margin-bottom:.4rem;transition:all .15s;min-height:44px;line-height:1.4}
+.comp-option:hover{border-color:rgba(196,152,46,.4);color:var(--parchment)}.comp-option.correct{border-color:rgba(61,107,46,.6);background:rgba(61,107,46,.12);color:#8acc70}.comp-option.correct::after{content:' ✓';color:var(--gold)}
+.comp-option.wrong{border-color:rgba(138,37,53,.5);background:rgba(138,37,53,.08);color:#c07080}
+.comp-hint{padding:.6rem .8rem;background:rgba(138,37,53,.06);border-left:2px solid rgba(138,37,53,.3);font-size:.8rem;color:#a07070;font-style:italic;margin:.5rem 0 .75rem;line-height:1.6}
+.comp-progress{font-family:'Cormorant Garamond',serif;font-size:.6rem;letter-spacing:.3em;color:#504838;text-align:right;margin-bottom:.5rem}
+.enter-btn{display:block;width:100%;margin-top:1.5rem;padding:1rem 2rem;background:transparent;border:2px solid var(--gold);color:var(--gold-light);cursor:pointer;font-family:'Cormorant Garamond',serif;font-size:1.1rem;letter-spacing:.4em;text-transform:uppercase;font-style:italic;transition:all .3s;animation:sealAppear .5s ease;min-height:52px}.enter-btn:hover{background:rgba(196,152,46,.15);color:var(--parchment)}
+.modal-overlay{position:fixed;inset:0;background:rgba(5,10,4,.9);z-index:100;display:flex;align-items:center;justify-content:center;padding:1.5rem;animation:fadeIn .2s ease}
+.modal{background:var(--forest);border:1px solid rgba(196,152,46,.3);padding:2rem;max-width:520px;width:100%;max-height:85vh;overflow-y:auto}
+.modal-title{font-family:'Cormorant Garamond',serif;font-size:1.3rem;font-style:italic;color:var(--parchment);margin-bottom:.75rem}
+.modal-body{font-size:.88rem;color:#907a50;line-height:1.75}
+.modal-close{margin-top:1.5rem;background:none;border:1px solid rgba(196,152,46,.3);color:var(--aged);padding:.5rem 1.5rem;cursor:pointer;font-family:'Cormorant Garamond',serif;font-size:.8rem;letter-spacing:.2em;font-style:italic;transition:all .2s;min-height:44px}.modal-close:hover{background:rgba(196,152,46,.1)}
+.contact-modal-safety{padding:.8rem 1rem;background:rgba(196,152,46,.06);border:1px solid rgba(196,152,46,.2);font-size:.82rem;color:var(--aged);line-height:1.7;font-style:italic;margin-bottom:1rem}
+.contact-modal-info{font-size:1rem;color:var(--parchment);padding:.8rem;background:rgba(61,107,46,.08);border:1px solid rgba(61,107,46,.2);word-break:break-word}
+.blocked-list{margin-top:.75rem}.blocked-item{display:flex;justify-content:space-between;align-items:center;padding:.5rem 0;border-bottom:1px solid rgba(196,152,46,.08);font-size:.85rem;color:var(--aged)}
+.unblock-btn{background:none;border:1px solid rgba(122,74,138,.3);color:var(--mauve);padding:.2rem .6rem;cursor:pointer;font-family:'Cormorant Garamond',serif;font-size:.7rem;border-radius:50px;transition:all .2s;min-height:44px;display:inline-flex;align-items:center}.unblock-btn:hover{background:rgba(122,74,138,.1)}
+.footer{border-top:1px solid rgba(196,152,46,.1);padding:1.5rem 2rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem;font-family:'Cormorant Garamond',serif;font-size:.65rem;letter-spacing:.25em;color:#302818;text-transform:uppercase}
+.footer-crisis{font-size:.7rem;color:#605040;text-align:center;width:100%;padding-top:.5rem;font-style:italic;letter-spacing:.1em}
+.empty{text-align:center;padding:4rem 2rem;color:#302818;font-family:'Cormorant Garamond',serif;font-style:italic;font-size:1.1rem}.empty-icon{font-size:2.5rem;margin-bottom:.75rem;opacity:.4}
+@media print{.header,.nav,.filters,.submit-btn,.action-btn,.contact-reveal-btn,.covenant-overlay,.skip-link,.zip-bar,.scam-warning{display:none!important}.root{background:white!important;color:black!important}.card{border:1px solid #ccc!important;background:white!important;page-break-inside:avoid}.card-title{color:black!important}.card-body{color:#333!important}}
+`;
+const styleTag = document.createElement("style");
+styleTag.textContent = css;
+document.head.appendChild(styleTag);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MAIN COMPONENT
+// ═══════════════════════════════════════════════════════════════════════════════
+export default function RootSystem() {
+  const [loaded,setLoaded]=useState(false);const [deviceId,setDeviceId]=useState(null);const [covenantAccepted,setCovenantAccepted]=useState(false);const [trustData,setTrustData_]=useState({score:TRUST.STARTING,history:[]});
+  const [view,setView]=useState("browse");const [msg,setMsg]=useState("");const [msgType,setMsgType]=useState("success");
+  const [posts,setPosts]=useState([]);const [coalitions,setCoalitions]=useState([]);const [tbLog,setTbLog]=useState([]);
+  const [appeals,setAppeals]=useState([]);const [blockedHandles,setBlockedHandles]=useState([]);
+  const [postLog,setPostLog]=useState([]);const [flagLog,setFlagLog]=useState([]);const [voteLog,setVoteLog]=useState([]);
+  const [catFilter,setCatFilter]=useState("all");const [typeFilter,setTypeFilter]=useState("all");const [zoneFilter,setZoneFilter]=useState("all");const [radiusFilter,setRadiusFilter]=useState("any");const [search,setSearch]=useState("");
+  const [userZip,setUserZip]=useState(null);const [zipInput,setZipInput]=useState("");const [zipLooking,setZipLooking]=useState(false);
+  const [form,setForm]=useState({type:"offer",freeSubtype:"items",category:"skills",title:"",body:"",contactInfo:"",zone:"Any / Network-wide",timebank:"",handle:"",tags:""});
+  const [tbForm,setTbForm]=useState({from:"",to:"",hours:"",description:""});
+  const [cForm,setCForm]=useState({title:"",purpose:"",members:"",contact:"",zone:"Any / Network-wide"});
+  const [reportedIds,setReportedIds]=useState(new Set());const [myVotedAppeals,setMyVotedAppeals]=useState(new Set());
+  const [contactModal,setContactModal]=useState(null);const [trustModal,setTrustModal]=useState(false);
+  const [showBlocked,setShowBlocked]=useState(false);const [dismissedWarnings,setDismissedWarnings]=useState(new Set());
+  const [appealText,setAppealText]=useState("");const mainRef=useRef(null);
+
+  function flash(m,type="success"){setMsg(m);setMsgType(type);setTimeout(()=>setMsg(""),4000)}
+
+  // ═══ INIT ═══
+  useEffect(()=>{(async()=>{
+    const dev=await getOrCreateDeviceId();setDeviceId(dev);
+    const cov=await pGet("covenant-accepted");if(cov?.accepted)setCovenantAccepted(true);
+    const td=await getTrustData();setTrustData_(td);
+    const bh=await pGet("blocked-handles");if(bh?.handles)setBlockedHandles(bh.handles);
+    const pl=await pGet("post-log");if(pl?.posts)setPostLog(pl.posts);
+    const fl=await pGet("flag-log");if(fl?.flags)setFlagLog(fl.flags);
+    const vl=await pGet("vote-log");if(vl?.votes)setVoteLog(vl.votes);
+    const mv=await pGet("my-voted-appeals");if(mv?.ids)setMyVotedAppeals(new Set(mv.ids));
+    const uz=await pGet("user-zip");if(uz?.zip)setUserZip(uz);
+
+    const postKeys=await sList("posts:");const lp=[];
+    for(const k of postKeys){const p=await sGet(k);if(p&&p.status==="active")lp.push(p)}
+    const sid=new Set(lp.map(p=>p.id));const ap=[...lp];
+    for(const s of SEED_POSTS){if(!sid.has(s.id)){ap.push(s);await sSet(`posts:${s.id}`,s)}}
+    setPosts(ap);
+
+    const coalKeys=await sList("coalitions:");const lc=[];
+    for(const k of coalKeys){const c=await sGet(k);if(c)lc.push(c)}
+    const cid=new Set(lc.map(c=>c.id));const ac=[...lc];
+    for(const s of SEED_COALITIONS){if(!cid.has(s.id)){ac.push(s);await sSet(`coalitions:${s.id}`,s)}}
+    setCoalitions(ac);
+
+    // Load appeals
+    const appealKeys=await sList("flagged-posts:");const la=[];
+    for(const k of appealKeys){const a=await sGet(k);if(a&&a.status==="pending")la.push(a)}
+    // Graceful decay: auto-restore if 3+ days, any restore votes, zero upholds
+    for(const a of la){
+      const days=(Date.now()-new Date(a.created).getTime())/86400000;
+      if(days>=RATE.GRACEFUL_DECAY_DAYS&&(a.restoreVotes||0)>0&&(a.upholdVotes||0)===0){
+        a.status="restored";await sSet(`flagged-posts:${a.id}`,a);
+        // Re-activate original post
+        const orig=await sGet(`posts:${a.postId}`);if(orig){orig.status="active";orig.flags=0;orig.flaggedBy=[];await sSet(`posts:${a.postId}`,orig);ap.push(orig);setPosts(prev=>[...prev,orig])}
+      }
+    }
+    setAppeals(la.filter(a=>a.status==="pending"));
+
+    const tbData=await sGet("timebank-ledger");if(tbData?.entries)setTbLog(tbData.entries);
+    const sh=await pGet("user-handle");if(sh?.handle)setForm(f=>({...f,handle:sh.handle}));
+    setLoaded(true);
+  })()},[]);
+
+  // ═══ ZIP ═══
+  async function handleZipSubmit(e){e?.preventDefault();const z=zipInput.trim();if(!/^\d{5}$/.test(z)){flash(S.zip.notFound,"warning");return}
+    setZipLooking(true);const r=await lookupZip(z);setZipLooking(false);if(!r){flash(S.zip.notFound,"warning");return}
+    const d={zip:z,lat:r.lat,lon:r.lon,city:r.city,state:r.state,timestamp:Date.now()};setUserZip(d);await pSet("user-zip",d);setZipInput("")}
+  function getPostDist(p){if(!userZip?.lat||!p.zip)return null;const c=ZIP_PREFIX_CENTROIDS[p.zip.slice(0,3)];return c?haversine(userZip.lat,userZip.lon,c.lat,c.lon):null}
+
+  // ═══ COVENANT ═══
+  async function acceptCovenant(){await pSet("covenant-accepted",{accepted:true,timestamp:Date.now(),version:"2026-02"});setCovenantAccepted(true)}
+
+  // ═══ RATE LIMITS ═══
+  function canPost(){const r24=countInWindow(postLog,RATE.MS_24H),r10=countInWindow(postLog,RATE.MS_10M);if(r24>=RATE.POST_MAX_24H)return{ok:false,reason:"daily"};if(r10>=RATE.POST_MAX_10M)return{ok:false,reason:"burst"};return{ok:true,remaining:RATE.POST_MAX_24H-r24}}
+  function canFlag(){return countInWindow(flagLog,RATE.MS_24H)<RATE.FLAG_MAX_24H}
+  function canVote(){return countInWindow(voteLog,RATE.MS_24H)<RATE.VOTE_MAX_24H}
+  async function logPost(){const u=pruneOld([...postLog,Date.now()],RATE.MS_24H);setPostLog(u);await pSet("post-log",{posts:u})}
+  async function logFlag(){const u=pruneOld([...flagLog,Date.now()],RATE.MS_24H);setFlagLog(u);await pSet("flag-log",{flags:u})}
+  async function logVote(){const u=pruneOld([...voteLog,Date.now()],RATE.MS_24H);setVoteLog(u);await pSet("vote-log",{votes:u})}
+
+  // ═══ BLOCK ═══
+  async function blockHandle(h){if(blockedHandles.includes(h))return;const u=[...blockedHandles,h];setBlockedHandles(u);await pSet("blocked-handles",{handles:u});flash(`Blocked ${h}.`)}
+  async function unblockHandle(h){const u=blockedHandles.filter(x=>x!==h);setBlockedHandles(u);await pSet("blocked-handles",{handles:u});flash(`Unblocked ${h}.`)}
+
+  // ═══ POST ACTIONS ═══
+  async function submitPost(e){
+    e.preventDefault();if(!covenantAccepted){flash("Accept the Covenant first.","warning");return}
+    const ck=canPost();if(!ck.ok){flash(ck.reason==="daily"?S.rateLimit.postLimit:S.rateLimit.postBurst,"warning");return}
+    const handle=form.handle.trim()||"Anonymous";const now=new Date();const exp=new Date(now);exp.setDate(exp.getDate()+RATE.EXPIRY_DAYS);
+    const post={id:gid(),type:form.type,freeSubtype:form.type==="free"?form.freeSubtype:undefined,category:form.category,title:form.title.trim(),body:form.body.trim(),contactInfo:form.contactInfo.trim(),zone:form.zone,timebank:form.type==="free"?0:(parseInt(form.timebank)||0),handle,deviceId:deviceId?.id||"unknown",created:now.toISOString().slice(0,10),expires:exp.toISOString().slice(0,10),tags:form.tags.split(",").map(t=>t.trim().toLowerCase()).filter(Boolean),flags:0,flaggedBy:[],status:"active",zip:userZip?.zip||""};
+    await sSet(`posts:${post.id}`,post);setPosts(prev=>[post,...prev]);await logPost();
+    if(handle!=="Anonymous")await pSet("user-handle",{handle,created:Date.now()});
+    const mp=(await pGet("my-posts"))||{postIds:[]};mp.postIds.push(post.id);await pSet("my-posts",mp);
+    setForm({type:"offer",freeSubtype:"items",category:"skills",title:"",body:"",contactInfo:"",zone:"Any / Network-wide",timebank:"",handle:handle!=="Anonymous"?handle:"",tags:""});
+    flash(S.post.successMsg);setView("browse");
+  }
+
+  async function renewPost(id){const p=posts.find(x=>x.id===id);if(!p)return;const now=new Date();const exp=new Date(now);exp.setDate(exp.getDate()+RATE.EXPIRY_DAYS);const u={...p,created:now.toISOString().slice(0,10),expires:exp.toISOString().slice(0,10)};await sSet(`posts:${id}`,u);setPosts(prev=>prev.map(x=>x.id===id?u:x));flash(S.expiration.renewed)}
+  async function deletePost(id){if(id.startsWith("s"))return;await sDel(`posts:${id}`);setPosts(prev=>prev.filter(x=>x.id!==id))}
+
+  async function flagPost(id){
+    if(reportedIds.has(id))return;if(!covenantAccepted){flash("Accept the Covenant to flag.","warning");return}if(!canFlag()){flash(S.rateLimit.flagLimit);return}
+    setReportedIds(prev=>new Set([...prev,id]));await logFlag();
+    const post=posts.find(p=>p.id===id);if(!post)return;
+    const age=deviceId?Date.now()-deviceId.created:RATE.MS_24H*2;const w=age<RATE.MS_24H?0.5:1;
+    const u={...post,flags:(post.flags||0)+w,flaggedBy:[...(post.flaggedBy||[]),{deviceId:deviceId?.id,deviceAge:age,weight:w}]};
+    if(u.flags>=RATE.FLAG_THRESHOLD){
+      u.status="removed";await sSet(`posts:${id}`,u);
+      // Create appeal entry
+      const appeal={id:gid(),postId:id,originalPost:{title:u.title,body:u.body,handle:u.handle,category:u.category,type:u.type},
+        flags:u.flags,flaggedBy:u.flaggedBy,appealText:null,restoreVotes:0,upholdVotes:0,voterIds:[],
+        created:new Date().toISOString(),status:"pending",creatorDeviceId:u.deviceId};
+      await sSet(`flagged-posts:${appeal.id}`,appeal);
+      setAppeals(prev=>[appeal,...prev]);
+      const newScore=await adjustTrust(TRUST.REMOVAL_PENALTY,"post_removed");setTrustData_(await getTrustData());
+    } else { await sSet(`posts:${id}`,u); }
+    setPosts(prev=>prev.map(p=>p.id===id?u:p).filter(p=>p.status==="active"));
+    flash("Post flagged.");
+  }
+
+  // ═══ APPEALS ═══
+  async function submitAppeal(appealId,text){
+    const a=appeals.find(x=>x.id===appealId);if(!a)return;
+    const u={...a,appealText:text.slice(0,500)};
+    await sSet(`flagged-posts:${appealId}`,u);
+    setAppeals(prev=>prev.map(x=>x.id===appealId?u:x));
+    flash(S.review.appealSuccess);
+  }
+
+  async function voteOnAppeal(appealId,vote){
+    if(!covenantAccepted){flash("Accept the Covenant to vote.","warning");return}
+    if(!canVote()){flash("You've voted enough today. Thank you.","warning");return}
+    if(myVotedAppeals.has(appealId))return;
+    const a=appeals.find(x=>x.id===appealId);if(!a||a.status!=="pending")return;
+    await logVote();
+    const u={...a};
+    if(vote==="restore")u.restoreVotes=(u.restoreVotes||0)+1;
+    else u.upholdVotes=(u.upholdVotes||0)+1;
+    u.voterIds=[...(u.voterIds||[]),deviceId?.id];
+
+    // Check thresholds
+    if(u.restoreVotes>=RATE.APPEAL_RESTORE){
+      u.status="restored";
+      const orig=await sGet(`posts:${a.postId}`);
+      if(orig){orig.status="active";orig.flags=0;orig.flaggedBy=[];await sSet(`posts:${a.postId}`,orig);setPosts(prev=>[orig,...prev])}
+      const ns=await adjustTrust(TRUST.APPEAL_BONUS,"appeal_restored");setTrustData_(await getTrustData());
+    } else if(u.upholdVotes>=RATE.APPEAL_UPHOLD){
+      u.status="upheld";
+      const ns=await adjustTrust(TRUST.REMOVAL_PENALTY,"appeal_upheld");setTrustData_(await getTrustData());
+    }
+    await sSet(`flagged-posts:${appealId}`,u);
+    setAppeals(prev=>prev.map(x=>x.id===appealId?u:x).filter(x=>x.status==="pending"));
+    const nv=new Set([...myVotedAppeals,appealId]);setMyVotedAppeals(nv);await pSet("my-voted-appeals",{ids:[...nv]});
+    flash(S.review.votedMsg);
+  }
+
+  // ═══ TIME BANK ═══
+  async function submitTb(e){e.preventDefault();if(!covenantAccepted){flash("Accept the Covenant first.","warning");return}
+    const entry={id:gid(),from:tbForm.from.trim(),to:tbForm.to.trim(),hours:parseFloat(tbForm.hours)||0,description:tbForm.description.trim(),timestamp:new Date().toISOString().slice(0,10)};
+    const u=[entry,...tbLog];setTbLog(u);await sSet("timebank-ledger",{entries:u});setTbForm({from:"",to:"",hours:"",description:""});flash(S.timebank.successMsg)}
+
+  // ═══ COALITIONS ═══
+  async function submitCoalition(e){e.preventDefault();if(!covenantAccepted){flash("Accept the Covenant first.","warning");return}
+    const members=cForm.members.split(",").map(m=>m.trim()).filter(Boolean);if(members.length<2){flash("Need at least 2 members.","warning");return}
+    const c={id:gid(),title:cForm.title.trim(),purpose:cForm.purpose.trim(),members,contact:cForm.contact.trim(),zone:cForm.zone,created:new Date().toISOString().slice(0,10)};
+    await sSet(`coalitions:${c.id}`,c);setCoalitions(prev=>[c,...prev]);setCForm({title:"",purpose:"",members:"",contact:"",zone:"Any / Network-wide"});flash(S.coalitions.successMsg)}
+
+  function revealContact(p){if(!covenantAccepted){flash("Accept the Covenant first.","warning");return}setContactModal({handle:p.handle,contactInfo:p.contactInfo})}
+  function findMatches(p){if(p.type!=="need")return[];return posts.filter(x=>x.type==="offer"&&x.id!==p.id&&x.status==="active"&&(x.category===p.category||p.tags.some(t=>x.tags.includes(t)))).slice(0,2)}
+
+  // ═══ FILTERING ═══
+  const visible=posts.filter(p=>{
+    if(p.status!=="active"||isExpired(p)||blockedHandles.includes(p.handle))return false;
+    if(catFilter!=="all"&&p.category!==catFilter)return false;
+    if(typeFilter!=="all"&&p.type!==typeFilter)return false;
+    if(zoneFilter!=="all"&&p.zone!==zoneFilter&&p.zone!=="Any / Network-wide")return false;
+    if(radiusFilter!=="any"&&userZip?.lat){const d=getPostDist(p);if(d!=null&&d>parseInt(radiusFilter))return false}
+    if(search){const s=search.toLowerCase();return p.title.toLowerCase().includes(s)||p.body.toLowerCase().includes(s)||p.tags.some(t=>t.includes(s))}
+    return true;
+  });
+  const totalHours=tbLog.reduce((s,e)=>s+e.hours,0);
+  const active=posts.filter(p=>p.status==="active"&&!isExpired(p));
+  const needCount=active.filter(p=>p.type==="need").length;
+  const offerCount=active.filter(p=>p.type==="offer").length;
+  const freeCount=active.filter(p=>p.type==="free").length;
+  const postCheck=canPost();
+  const pendingAppeals=appeals.filter(a=>a.status==="pending"&&appealDaysLeft(a)>0);
+
+  if(!loaded)return (<div className="root" style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh"}}><div style={{textAlign:"center",color:"var(--moss)",fontFamily:"'Cormorant Garamond',serif",fontStyle:"italic",fontSize:"1.1rem"}}><div style={{marginBottom:"0.5rem",animation:"shimmer 2s ease-in-out infinite"}}>❧</div>Loading the commons…</div></div>);
+
+  return (
+    <div className="root">
+      <a href="#main-content" className="skip-link">Skip to main content</a>
+      {!covenantAccepted&&<CovenantWall onAccept={acceptCovenant}/>}
+      {contactModal&&<div className="modal-overlay" role="dialog" onClick={()=>setContactModal(null)}><div className="modal" onClick={e=>e.stopPropagation()}><div className="modal-title">Contact — {contactModal.handle}</div><div className="contact-modal-safety">{S.contact.safetyMsg}</div><div className="contact-modal-info">{contactModal.contactInfo}</div><button className="modal-close" onClick={()=>setContactModal(null)}>Close</button></div></div>}
+      {trustModal&&<div className="modal-overlay" role="dialog" onClick={()=>setTrustModal(false)}><div className="modal" onClick={e=>e.stopPropagation()}>
+        <div className="modal-title">{S.trust.title}</div>
+        <div className="trust-modal-score">{trustData.score.toFixed(1)}</div>
+        <div className="modal-body">{S.trust.explainer}</div>
+        <ul className="trust-modal-rules"><li>{S.trust.startVal}</li><li>{S.trust.exchange}</li><li>{S.trust.survives}</li><li>{S.trust.flagPenalty}</li><li>{S.trust.removal}</li><li>{S.trust.appealBonus}</li><li>{S.trust.floor}</li><li>{S.trust.ceiling}</li></ul>
+        {trustData.history.length>0&&<div className="trust-history"><div style={{fontSize:".65rem",color:"var(--sage)",letterSpacing:".3em",textTransform:"uppercase",marginBottom:".5rem",fontFamily:"'Cormorant Garamond',serif"}}>History</div>
+          {trustData.history.slice(-10).reverse().map((ev,i)=><div key={i} className="trust-event"><span>{ev.event.replace(/_/g," ")}</span><span className={`trust-event-delta ${ev.delta>0?"trust-delta-pos":"trust-delta-neg"}`}>{ev.delta>0?"+":""}{ev.delta}</span></div>)}
+        </div>}
+        <button className="modal-close" onClick={()=>setTrustModal(false)}>Close</button>
+      </div></div>}
+
+      <header className="header" role="banner"><div className="header-eyebrow">{S.header.eyebrow}</div><div className="vine-divider" aria-hidden="true">{S.header.vine}</div><h1 className="header-title"><span>Root</span> System</h1><div className="vine-divider" aria-hidden="true">❧ ✦ ❧ ✦ ❧</div><div className="header-subtitle">{S.header.subtitle}</div></header>
+
+      <nav className="nav" role="navigation" aria-label="Main navigation">
+        {[{id:"browse",label:S.nav.browse},{id:"post",label:S.nav.post},{id:"timebank",label:S.nav.timebank},{id:"coalitions",label:S.nav.coalitions},{id:"review",label:S.nav.review,count:pendingAppeals.length},{id:"safety",label:S.nav.safety,dot:true},{id:"about",label:S.nav.about}].map(({id,label,dot,count})=>(
+          <button key={id} className={`nav-btn${view===id?" active":""}`} onClick={()=>setView(id)} aria-current={view===id?"page":undefined}>
+            {label}{dot&&<span className="nav-dot" aria-label="Important"/>}{count>0&&<span className="nav-count">{count}</span>}
+          </button>
+        ))}
+      </nav>
+
+      <main className="main" id="main-content" ref={mainRef} tabIndex={-1}>
+        {msg&&<div className={msgType==="error"?"error-msg":msgType==="warning"?"warning-msg":"success-msg"} role="status" aria-live="polite">{msg}</div>}
+
+        {/* ═══ BROWSE ═══ */}
+        {view==="browse"&&(<>
+          <div className="section-label" role="heading" aria-level={2}>{S.browse.sectionLabel(offerCount,needCount,freeCount)}</div>
+          <div className="zip-bar">{!userZip?(<><span className="zip-label">{S.zip.prompt}</span><form onSubmit={handleZipSubmit} style={{display:"flex",gap:".4rem",alignItems:"center"}}><input className="zip-input-sm" placeholder="zip" maxLength={5} value={zipInput} onChange={e=>setZipInput(e.target.value.replace(/\D/g,""))} aria-label="Zip code"/><button type="submit" className="chip" disabled={zipLooking} style={{minHeight:"44px"}}>{zipLooking?"…":"Set"}</button></form><span className="field-hint" style={{marginTop:0}}>{S.zip.hint}</span></>):(<><span className="zip-set">📍 {userZip.city?`${userZip.city}, ${userZip.state}`:`Zip ${userZip.zip}`}</span><button className="zip-change-btn" onClick={()=>{setUserZip(null);pSet("user-zip",null)}}>{S.zip.changeBtn}</button></>)}</div>
+          <div className="filters" role="search" aria-label="Filter posts">
+            <button className={`chip${typeFilter==="all"?" active":""}`} onClick={()=>setTypeFilter("all")} aria-pressed={typeFilter==="all"}>{S.browse.allFilter}</button>
+            <button className={`chip type-offer${typeFilter==="offer"?" active":""}`} onClick={()=>setTypeFilter(typeFilter==="offer"?"all":"offer")} aria-pressed={typeFilter==="offer"}>{S.browse.offerFilter}</button>
+            <button className={`chip type-need${typeFilter==="need"?" active":""}`} onClick={()=>setTypeFilter(typeFilter==="need"?"all":"need")} aria-pressed={typeFilter==="need"}>{S.browse.needFilter}</button>
+            <button className={`chip type-free${typeFilter==="free"?" active":""}`} onClick={()=>setTypeFilter(typeFilter==="free"?"all":"free")} aria-pressed={typeFilter==="free"}>{S.browse.freeFilter}</button>
+            <span style={{color:"rgba(196,152,46,.2)",margin:"0 .25rem"}} aria-hidden="true">✦</span>
+            {CATEGORIES.map(cat=><button key={cat.id} className={`chip${catFilter===cat.id?" active":""}`} onClick={()=>setCatFilter(catFilter===cat.id?"all":cat.id)} aria-pressed={catFilter===cat.id}><span aria-hidden="true">{cat.emoji}</span> {cat.label}</button>)}
+            <span style={{color:"rgba(196,152,46,.2)",margin:"0 .25rem"}} aria-hidden="true">✦</span>
+            <select className="search-input" style={{width:"auto",paddingRight:".5rem"}} value={zoneFilter} onChange={e=>setZoneFilter(e.target.value)} aria-label="Zone">{[["all","All Zones"],...ZONES.map(z=>[z,z])].map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>
+            {userZip&&<select className="search-input" style={{width:"auto",paddingRight:".5rem"}} value={radiusFilter} onChange={e=>setRadiusFilter(e.target.value)} aria-label="Distance">{RADIUS_OPTIONS.map(r=><option key={r.value} value={r.value}>{r.label}</option>)}</select>}
+            <input className="search-input" placeholder={S.browse.searchPlaceholder} value={search} onChange={e=>setSearch(e.target.value)} aria-label="Search"/>
+            <button className="chip" onClick={()=>window.print()} style={{marginLeft:"auto"}}><span aria-hidden="true">🖨</span> {S.browse.printBtn}</button>
+          </div>
+          {visible.length===0?<div className="empty" role="status"><div className="empty-icon" aria-hidden="true">🌿</div>{S.browse.empty}</div>:(
+            <div className="card-grid">{visible.map(post=>{
+              const matches=findMatches(post);const flagged=(post.flags||0)>=2;const cat=CATEGORIES.find(c=>c.id===post.category);
+              const isOwn=post.deviceId===deviceId?.id;const dist=getPostDist(post);const expL=expiryLabel(post);const dLeft=post.id.startsWith("s")?null:daysUntilExpiry(post.created);
+              const showRenew=isOwn&&dLeft!=null&&dLeft<=RATE.RENEW_WARN&&dLeft>0;const warnings=detectScamWarnings(post);
+              return (<article key={post.id} className={`card ${post.type}${flagged?" flagged":""}`}>
+                <span className="card-corner" aria-hidden="true">{cat?.emoji||"✦"}</span>
+                <div className={`card-type-badge badge-${post.type}`}>
+                  <span>{post.type==="offer"?"◆ Offering":post.type==="need"?"◇ Seeking":""}</span>
+                  {post.type==="free"&&<span className="free-badge"><span aria-hidden="true">🌿</span> Freely Given{post.freeSubtype?` · ${post.freeSubtype}`:""}</span>}
+                  {(post.flags||0)>0&&<span style={{color:"#c07050",marginLeft:"auto",fontSize:".6rem"}}>⚑ {Math.ceil(post.flags)}</span>}
+                </div>
+                <h3 className="card-title">{post.title}</h3>
+                {post.zone&&post.zone!=="Any / Network-wide"&&<div className="card-zone">◉ {post.zone}</div>}
+                <div className="card-body">{post.body}</div>
+                {/* Scam pattern warnings */}
+                {warnings.filter(w=>!dismissedWarnings.has(post.id+w.id)).map(w=>(
+                  <div key={w.id} className="scam-warning"><span>{w.msg}</span><button className="scam-warning-dismiss" onClick={()=>setDismissedWarnings(prev=>new Set([...prev,post.id+w.id]))} aria-label="Dismiss warning">✕</button></div>
+                ))}
+                {post.contactInfo&&<button className="contact-reveal-btn" onClick={()=>revealContact(post)}><span aria-hidden="true">📬</span> {S.contact.revealBtn}</button>}
+                <div className="card-tags">{post.tags.map(t=><span key={t} className="tag">#{t}</span>)}</div>
+                <div className="card-meta">
+                  <span>{post.handle} · {fmt(post.created)}{" · "}<span className="trust-badge" onClick={()=>setTrustModal(true)}>trust: {trustData.score.toFixed(1)}</span>
+                    {dist!=null&&<>{" · "}<span className="distance-badge">{distLabel(dist)}</span></>}
+                    {expL&&<>{" · "}<span className={`expiry-badge${dLeft!=null&&dLeft<=2?" urgent":""}`}>{expL}</span></>}
+                    {showRenew&&<>{" "}<button className="renew-btn" onClick={()=>renewPost(post.id)}>{S.expiration.renewBtn}</button></>}
+                  </span>
+                  <div className="card-actions">
+                    {post.timebank>0&&<span className="tb-badge"><span aria-hidden="true">⏱</span> {post.timebank}h</span>}
+                    {isOwn&&!post.id.startsWith("s")&&<button className="action-btn delete-action" onClick={()=>deletePost(post.id)} title="Remove">✕</button>}
+                    {!isOwn&&<button className="action-btn block-action" onClick={()=>blockHandle(post.handle)} title="Block">⊘</button>}
+                    <button className={`action-btn${reportedIds.has(post.id)?" flagged-state":""}`} onClick={()=>flagPost(post.id)} title="Flag">⚑ {reportedIds.has(post.id)?"flagged":"flag"}</button>
+                  </div>
+                </div>
+                {matches.length>0&&<div className="match-banner"><span aria-hidden="true">✦</span> Matching: {matches.map(m=>m.title).join(" · ")}</div>}
+              </article>)})}</div>
+          )}
+          {blockedHandles.length>0&&<div style={{marginTop:"2rem"}}><button className="chip" onClick={()=>setShowBlocked(!showBlocked)} aria-expanded={showBlocked}>{showBlocked?"Hide":"Show"} blocked ({blockedHandles.length})</button>{showBlocked&&<div className="blocked-list">{blockedHandles.map(h=><div key={h} className="blocked-item"><span>{h}</span><button className="unblock-btn" onClick={()=>unblockHandle(h)}>{S.block.unblockBtn}</button></div>)}</div>}</div>}
+        </>)}
+
+        {/* ═══ POST FORM ═══ */}
+        {view==="post"&&(<div className="form-wrap"><h2 className="form-title">{S.post.title}</h2><p className="form-desc">{S.post.desc}</p>
+          <div className="privacy-warning">{S.post.privacyWarning}</div>
+          <div className="compact-box"><div className="compact-title"><span aria-hidden="true">✦</span> {S.post.compactTitle}</div><ul className="compact-rules">{COMPACT_RULES.map((r,i)=><li key={i}>{r}</li>)}</ul></div>
+          {!covenantAccepted&&<div className="warning-msg">Accept the Community Covenant before posting.</div>}
+          <form onSubmit={submitPost}>
+            <label className="field-label">I am…</label>
+            <div className="type-toggle"><button type="button" className={`type-btn offer${form.type==="offer"?" active":""}`} onClick={()=>setForm(f=>({...f,type:"offer"}))}>{S.post.offering}</button><button type="button" className={`type-btn need${form.type==="need"?" active":""}`} onClick={()=>setForm(f=>({...f,type:"need"}))}>{S.post.seeking}</button><button type="button" className={`type-btn free-type${form.type==="free"?" active":""}`} onClick={()=>setForm(f=>({...f,type:"free"}))}>{S.post.freeGiving}</button></div>
+            {form.type==="free"&&<><label className="field-label">{S.post.freeSubLabel}</label><div className="free-sub-toggle">{FREE_SUBTYPES.map(st=><button key={st.id} type="button" className={`free-sub-btn${form.freeSubtype===st.id?" active":""}`} onClick={()=>setForm(f=>({...f,freeSubtype:st.id}))}>{st.label}</button>)}</div></>}
+            <label className="field-label" htmlFor="pc">{S.post.catLabel}</label><select id="pc" className="form-select" value={form.category} onChange={e=>setForm(f=>({...f,category:e.target.value}))}>{CATEGORIES.map(c=><option key={c.id} value={c.id}>{c.emoji} {c.label}</option>)}</select>
+            <label className="field-label" htmlFor="pz">{S.post.zoneLabel}</label><select id="pz" className="form-select" value={form.zone} onChange={e=>setForm(f=>({...f,zone:e.target.value}))}>{ZONES.map(z=><option key={z} value={z}>{z}</option>)}</select><div className="field-hint">{S.post.zoneHint}</div>
+            <label className="field-label" htmlFor="pt">{S.post.titleLabel}</label><input id="pt" className="form-input" required placeholder={S.post.titlePH} value={form.title} onChange={e=>setForm(f=>({...f,title:e.target.value}))}/>
+            <label className="field-label" htmlFor="pb">{S.post.bodyLabel}</label><textarea id="pb" className="form-textarea" required placeholder={S.post.bodyPH} value={form.body} onChange={e=>setForm(f=>({...f,body:e.target.value}))}/>
+            <label className="field-label" htmlFor="pci">{S.post.contactLabel}</label><input id="pci" className="form-input" placeholder={S.post.contactPH} value={form.contactInfo} onChange={e=>setForm(f=>({...f,contactInfo:e.target.value}))}/><div className="field-hint">{S.post.contactHint}</div>
+            <label className="field-label" htmlFor="ph">{S.post.handleLabel}</label><input id="ph" className="form-input" placeholder={S.post.handlePH} value={form.handle} onChange={e=>setForm(f=>({...f,handle:e.target.value}))}/>
+            {form.type!=="free"&&<><label className="field-label" htmlFor="ptb">{S.post.tbLabel}</label><input id="ptb" className="form-input" type="number" min="0" value={form.timebank} onChange={e=>setForm(f=>({...f,timebank:e.target.value}))}/></>}
+            <label className="field-label" htmlFor="ptg">{S.post.tagsLabel}</label><input id="ptg" className="form-input" placeholder={S.post.tagsPH} value={form.tags} onChange={e=>setForm(f=>({...f,tags:e.target.value}))}/>
+            <button type="submit" className="submit-btn" disabled={!covenantAccepted}>{S.post.submitBtn} →</button>
+            {postCheck.ok&&<div className="rate-limit-footer">{S.rateLimit.remaining(postCheck.remaining)}</div>}
+          </form>
+        </div>)}
+
+        {/* ═══ TIME BANK ═══ */}
+        {view==="timebank"&&(<><div className="section-label" role="heading" aria-level={2}>{S.timebank.sectionLabel}</div>
+          <p style={{fontSize:".88rem",color:"#907a50",lineHeight:1.75,maxWidth:"560px",marginBottom:"2rem"}}>{S.timebank.desc}</p>
+          <div className="tb-grid"><div>
+            <div className="tb-stat"><span className="tb-stat-num">{totalHours.toFixed(1)}</span><span className="tb-stat-label">{S.timebank.totalHours}</span></div>
+            <div className="tb-stat"><span className="tb-stat-num">{tbLog.length}</span><span className="tb-stat-label">{S.timebank.totalExchanges}</span></div>
+            <div style={{marginTop:"1.5rem"}}><div className="section-label">{S.timebank.logLabel}</div>
+              {!covenantAccepted&&<div className="warning-msg">Accept the Covenant to log exchanges.</div>}
+              <form onSubmit={submitTb}><label className="field-label" htmlFor="tf">Who gave?</label><input id="tf" className="form-input" required placeholder="Name/handle" value={tbForm.from} onChange={e=>setTbForm(f=>({...f,from:e.target.value}))}/><label className="field-label" htmlFor="tt">Who received?</label><input id="tt" className="form-input" required placeholder="Name/handle" value={tbForm.to} onChange={e=>setTbForm(f=>({...f,to:e.target.value}))}/><label className="field-label" htmlFor="th">Hours</label><input id="th" className="form-input" required type="number" min="0.25" step="0.25" placeholder="1.0" value={tbForm.hours} onChange={e=>setTbForm(f=>({...f,hours:e.target.value}))}/><label className="field-label" htmlFor="tw">What?</label><input id="tw" className="form-input" required placeholder="e.g. 3hrs childcare" value={tbForm.description} onChange={e=>setTbForm(f=>({...f,description:e.target.value}))}/><button type="submit" className="submit-btn" disabled={!covenantAccepted}>{S.timebank.submitBtn} →</button></form>
+            </div>
+          </div><div><div className="section-label">{S.timebank.ledgerLabel}</div>{tbLog.length===0?<div className="empty" style={{padding:"2rem 0",textAlign:"left"}}>{S.timebank.emptyLedger}</div>:tbLog.map(e=><div key={e.id} className="tb-entry"><div className="tb-entry-main">{e.hours}h — {e.description}</div><div className="tb-entry-sub">{e.from} → {e.to} · {fmt(e.timestamp)}</div></div>)}</div></div>
+        </>)}
+
+        {/* ═══ COALITIONS ═══ */}
+        {view==="coalitions"&&(<><div className="section-label" role="heading" aria-level={2}>{S.coalitions.sectionLabel}</div>
+          <p style={{fontSize:".88rem",color:"#907a50",lineHeight:1.75,maxWidth:"560px",marginBottom:"2rem"}}>{S.coalitions.desc}</p>
+          {coalitions.filter(c=>c.members.length>=2).map(c=><div key={c.id} className="coalition-card"><h3 className="coalition-title">{c.title}</h3><div className="coalition-meta">{c.zone} · Started {fmt(c.created)} · {c.contact}</div><div className="coalition-body">{c.purpose}</div><div className="coalition-members">{c.members.map(m=><span key={m} className="member-chip">{m}</span>)}</div></div>)}
+          <div style={{marginTop:"2.5rem",borderTop:"1px solid rgba(196,152,46,.1)",paddingTop:"2rem"}}><div className="section-label">{S.coalitions.startLabel}</div>
+            {!covenantAccepted&&<div className="warning-msg">Accept the Covenant first.</div>}
+            <div className="form-wrap"><form onSubmit={submitCoalition}>
+              <label className="field-label" htmlFor="cn">Name</label><input id="cn" className="form-input" required placeholder="e.g. Eastside Tool Library" value={cForm.title} onChange={e=>setCForm(f=>({...f,title:e.target.value}))}/>
+              <label className="field-label" htmlFor="cp">Purpose</label><textarea id="cp" className="form-textarea" required placeholder="What is this coalition doing?" value={cForm.purpose} onChange={e=>setCForm(f=>({...f,purpose:e.target.value}))}/>
+              <label className="field-label" htmlFor="cz">Zone</label><select id="cz" className="form-select" value={cForm.zone} onChange={e=>setCForm(f=>({...f,zone:e.target.value}))}>{ZONES.map(z=><option key={z} value={z}>{z}</option>)}</select>
+              <label className="field-label" htmlFor="cm">Members (comma separated)</label><input id="cm" className="form-input" placeholder="Ana K., Marcus W." value={cForm.members} onChange={e=>setCForm(f=>({...f,members:e.target.value}))}/><div className="field-hint">Min 2 members to be visible.</div>
+              <label className="field-label" htmlFor="cc">Contact</label><input id="cc" className="form-input" required placeholder="Email, Signal, or meeting time" value={cForm.contact} onChange={e=>setCForm(f=>({...f,contact:e.target.value}))}/>
+              <button type="submit" className="submit-btn" disabled={!covenantAccepted}>{S.coalitions.submitBtn} →</button>
+            </form></div>
+          </div>
+        </>)}
+
+        {/* ═══ COMMUNITY REVIEW ═══ */}
+        {view==="review"&&(<><div className="section-label" role="heading" aria-level={2}>{S.review.sectionLabel}</div>
+          <p style={{fontSize:".88rem",color:"#907a50",lineHeight:1.75,maxWidth:"640px",marginBottom:"2rem"}}>{S.review.desc}</p>
+          {pendingAppeals.length===0?<div className="empty"><div className="empty-icon" aria-hidden="true">🌿</div>{S.review.empty}</div>:
+            pendingAppeals.map(a=>{const dLeft=appealDaysLeft(a);const voted=myVotedAppeals.has(a.id);const isCreator=a.creatorDeviceId===deviceId?.id;
+              return (<div key={a.id} className="appeal-card">
+                <div className="appeal-header">Flagged post by {a.originalPost.handle}</div>
+                <div className="appeal-original"><strong>{a.originalPost.title}</strong><br/>{a.originalPost.body}</div>
+                {a.appealText?<div className="appeal-text">Appeal: "{a.appealText}"</div>:
+                  isCreator?<div style={{marginTop:".5rem"}}><textarea className="form-textarea" style={{minHeight:"60px"}} maxLength={500} placeholder={S.review.appealPH} value={appealText} onChange={e=>setAppealText(e.target.value)}/><button className="chip" style={{marginTop:".3rem"}} onClick={()=>{submitAppeal(a.id,appealText);setAppealText("")}}>{S.review.appealSubmit}</button></div>:
+                  <div className="appeal-text" style={{color:"#504838"}}>No appeal submitted yet.</div>
+                }
+                <div className="appeal-meta">Flags: {Math.ceil(a.flags)} · {dLeft}d remaining · <span className="vote-counts">Restore: {a.restoreVotes||0} · Uphold: {a.upholdVotes||0}</span></div>
+                {!isCreator&&<div className="appeal-votes">
+                  <button className="vote-btn restore" disabled={voted||!covenantAccepted} onClick={()=>voteOnAppeal(a.id,"restore")}>↻ {S.review.restoreBtn}</button>
+                  <button className="vote-btn uphold" disabled={voted||!covenantAccepted} onClick={()=>voteOnAppeal(a.id,"uphold")}>✕ {S.review.upholdBtn}</button>
+                  {voted&&<span style={{fontSize:".7rem",color:"var(--sage)",fontStyle:"italic",display:"flex",alignItems:"center"}}>You voted</span>}
+                </div>}
+              </div>)})
+          }
+        </>)}
+
+        {/* ═══ SAFETY ═══ */}
+        {view==="safety"&&(<><div className="section-label" role="heading" aria-level={2}>Safe Exchange Protocol</div>
+          <p style={{fontSize:".88rem",color:"#907a50",lineHeight:1.75,maxWidth:"640px",marginBottom:"2rem"}}>This network exists to serve your dignity and safety.</p>
+          <div className="safety-grid">
+            <div className="safety-card"><span className="safety-icon" aria-hidden="true">🌿</span><h3 className="safety-title">First Meetings</h3><ul className="safety-body"><li>Meet in public first</li><li>Tell someone where you're going</li><li>Bring a friend</li><li>Drive separately</li><li>Trust your gut</li></ul></div>
+            <div className="safety-card"><span className="safety-icon" aria-hidden="true">🔒</span><h3 className="safety-title">Privacy</h3><ul className="safety-body"><li>Use Signal for communication</li><li>ProtonMail for email</li><li>Never required to give your real name</li><li>Never post an address</li><li>Anonymous posting is valid</li></ul></div>
+            <div className="safety-card"><span className="safety-icon" aria-hidden="true">⚖️</span><h3 className="safety-title">Fair Exchange</h3><ul className="safety-body"><li>One hour = one hour</li><li>Clear agreements first</li><li>You can stop at any point</li><li>Mutual aid is gift economy</li><li>Pressure = red flag</li></ul></div>
+            <div className="safety-card safety-critical"><span className="safety-icon" aria-hidden="true">⚑</span><h3 className="safety-title">Flagging & Appeals</h3><ul className="safety-body"><li>Flag anything that concerns you</li><li>3 flags → post hidden, appeal available</li><li>Community votes to restore or uphold</li><li>No penalty for good-faith flagging</li><li>Check the Review tab for pending appeals</li></ul></div>
+            <div className="safety-card"><span className="safety-icon" aria-hidden="true">🤲</span><h3 className="safety-title">Boundaries & Grooming</h3><ul className="safety-body"><li>No sexual services or implied exchanges</li><li>Trust takes time — excessive generosity deserves scrutiny</li><li>Watch for: love bombing, manufactured urgency, isolation, boundary testing</li><li>If unsafe, stop — no explanation needed</li><li>Warn the community about bad actors</li></ul></div>
+            <div className="safety-card"><span className="safety-icon" aria-hidden="true">📞</span><h3 className="safety-title">Resources</h3><ul className="resource-list"><li><strong>988:</strong> Suicide & Crisis Lifeline</li><li><strong>741741:</strong> Crisis Text Line</li><li><strong>1-800-656-4673:</strong> RAINN</li><li><strong>1-800-799-7233:</strong> DV Hotline</li><li><strong>1-800-662-4357:</strong> SAMHSA</li><li><strong>211:</strong> Local services</li><li><strong>signal.org</strong> · <strong>proton.me</strong></li><li><strong>findhelp.org</strong> · <strong>benefitscheckup.org</strong></li></ul></div>
+          </div>
+          <div className="red-flag-box"><div className="red-flag-title"><span aria-hidden="true">⚑</span> Red Flags</div><ul className="red-flag-list"><li>Money upfront</li><li>Urgency pressure</li><li>Won't meet in public</li><li>Vague about their offer</li><li>Asks for documents or ID</li><li>Too-good offers</li><li>Creates false debt</li><li>Dismisses your concerns</li></ul></div>
+        </>)}
+
+        {/* ═══ ABOUT ═══ */}
+        {view==="about"&&(<><div className="section-label" role="heading" aria-level={2}>The Community Compact</div>
+          <div className="manifesto-drop">"Helping your neighbor is not an ideology. It is older than any movement that has tried to claim it."</div>
+          <h3 className="about-h">What is Root System?</h3><p className="about-p">A free tool for neighbors helping neighbors. No accounts, no ads, no cost.</p>
+          <h3 className="about-h">Who is it for?</h3><p className="about-p">Anyone. Churches, rural counties, neighborhoods. Designed for adults. Under 18? Call 211.</p>
+          <h3 className="about-h">Time banking</h3><p className="about-p">One hour equals one hour, regardless of skill.</p>
+          <h3 className="about-h">Coalitions</h3><p className="about-p">Group projects — tool libraries, buying clubs, childcare co-ops. Min 2 members.</p>
+          <h3 className="about-h">Privacy</h3><p className="about-p">No tracking, no advertising. Posts are public and expire after 7 days.</p>
+          <h3 className="about-h">Safety</h3><p className="about-p">Covenant, flagging, appeals, trust scores, and the Safety section. Flag what concerns you. Block who you need to.</p>
+          <h3 className="about-h">This is yours.</h3><p className="about-p">Fork it. Run it for your community. Keep the good faith intact.</p>
+        </>)}
+      </main>
+
+      <footer className="footer" role="contentinfo"><span>{S.footer.name}</span><span>{S.footer.license}</span><span>{S.footer.use}</span><div className="footer-crisis">{S.footer.crisis}</div></footer>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// COVENANT WALL
+// ═══════════════════════════════════════════════════════════════════════════════
+function CovenantWall({onAccept}){
+  const [c1,setC1]=useState(false);const [c2,setC2]=useState(false);const [scrolled,setScrolled]=useState(false);
+  const [curQ,setCurQ]=useState(0);const [answers,setAnswers]=useState({});const [wrong,setWrong]=useState(null);const [allOk,setAllOk]=useState(false);
+  const ref=useRef(null);const show=c1&&c2&&scrolled;
+  function onScroll(){const el=ref.current;if(el&&el.scrollHeight-el.scrollTop-el.clientHeight<30)setScrolled(true)}
+  function pick(qId,key){const q=COMP_QUESTIONS.find(x=>x.id===qId);if(!q||answers[qId])return;
+    if(key===q.correct){const na={...answers,[qId]:key};setAnswers(na);setWrong(null);if(Object.keys(na).length===COMP_QUESTIONS.length)setAllOk(true);else setTimeout(()=>setCurQ(c=>c+1),600)}
+    else setWrong({qId,key})}
+  const q=COMP_QUESTIONS[curQ];
+  return (<div className="covenant-overlay" role="dialog" aria-label="Community Covenant"><div className="covenant-card">
+    <div className="covenant-header">The <span>Root System</span> Covenant</div><div className="covenant-vine" aria-hidden="true">❧ ✦ ❧ ✦ ❧</div>
+    <div className="covenant-minor-notice">{S.covenant.minorNotice}</div>
+    <div className="covenant-body" ref={ref} onScroll={onScroll} tabIndex={0} aria-label="Covenant text">
+      {COVENANT_TEXT.map((s,i)=><div key={i} className="covenant-section">{s.h&&<div className="covenant-section-heading">{s.h}</div>}<div className="covenant-section-body">{s.b}</div></div>)}
+    </div>
+    {!scrolled&&<div className="covenant-scroll-indicator" aria-hidden="true">↓ scroll to read ↓</div>}
+    <div className="covenant-checkbox-area">
+      <label className="covenant-check-row"><input type="checkbox" checked={c1} onChange={e=>setC1(e.target.checked)}/><span className="covenant-check-label">{S.covenant.checkbox1}</span></label>
+      <label className="covenant-check-row"><input type="checkbox" checked={c2} onChange={e=>setC2(e.target.checked)}/><span className="covenant-check-label">{S.covenant.checkbox2}</span></label>
+    </div>
+    {show&&!allOk&&q&&<div className="comp-gate"><div className="comp-label">Comprehension Check</div><div className="comp-progress">{curQ+1} of {COMP_QUESTIONS.length}</div>
+      <div className="comp-question">{q.question}</div>
+      {q.options.map(o=>{const isC=answers[q.id]===o.key;const isW=wrong?.qId===q.id&&wrong?.key===o.key;
+        return <button key={o.key} className={`comp-option${isC?" correct":""}${isW?" wrong":""}`} onClick={()=>pick(q.id,o.key)} disabled={!!answers[q.id]}>({o.key}) {o.text}</button>})}
+      {wrong?.qId===q.id&&<div className="comp-hint"><strong>{S.covenant.wrongAnswer}</strong><br/><em>"{q.ref}"</em></div>}
+    </div>}
+    {allOk&&<button className="enter-btn" onClick={onAccept}>{S.covenant.enterBtn} →</button>}
+  </div></div>);
+}

@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Plant a Community — Root System</title>
+  <meta name="description" content="Start a free Root System community board for your neighborhood. We'll set it up and send you the link, usually within 24–48 hours.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;0,700;1,400&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#2D5016">
+  <meta property="og:type"        content="website">
+  <meta property="og:title"       content="Plant a Community — Root System">
+  <meta property="og:description" content="Start a free Root System community board for your neighborhood. We'll set it up and send you the link within 24–48 hours.">
+  <meta property="og:url"         content="https://rootsystem.org/plant.html">
+</head>
+<body>
+
+  <!-- ─── HEADER ──────────────────────────────────────────────────────────── -->
+  <header class="site-header">
+    <div class="container">
+      <div class="header-inner">
+        <a href="/" class="site-logo" aria-label="Root System — home">
+          <img src="assets/logo.svg" alt="" class="logo-mark" width="34" height="40">
+          <div class="logo-text">
+            Root System
+            <small>Community Commons</small>
+          </div>
+        </a>
+        <nav class="site-nav" aria-label="Main navigation">
+          <a href="/" class="nav-link">Find</a>
+          <a href="about.html" class="nav-link">About</a>
+          <a href="plant.html" class="nav-link nav-link--cta active" aria-current="page">🌱 Plant One</a>
+        </nav>
+      </div>
+    </div>
+  </header>
+
+  <main>
+
+    <!-- ─── PAGE HERO ────────────────────────────────────────────────────── -->
+    <div class="page-hero">
+      <div class="container">
+        <h1>🌱 Plant a Community</h1>
+        <p>
+          Starting a Root System for your neighborhood is free and takes
+          just a few minutes. We'll set it up and send you the link.
+        </p>
+      </div>
+    </div>
+
+    <!-- ─── FORM ──────────────────────────────────────────────────────────── -->
+    <section class="section">
+      <div class="container">
+
+        <!-- Success message (hidden until form submits) -->
+        <div class="form-success" id="plant-success" hidden aria-live="polite">
+          <span class="form-success-icon" aria-hidden="true">🌱</span>
+          <h2>Your community is being planted!</h2>
+          <p>
+            We got your request and we'll have your community link ready
+            within <strong>24–48 hours</strong>. Check your email — we'll send
+            you the link and a printable flyer you can share with your neighbors.
+          </p>
+          <p style="margin-top:1.25rem">
+            While you wait: think about where you'll put the flyer first.
+            The library, the post office, a coffee shop, your church bulletin board,
+            or the laundromat are all good places to start.
+          </p>
+          <div style="margin-top:1.75rem">
+            <a href="planters-kit.html" class="btn-primary">
+              Read the Planter's Kit →
+            </a>
+          </div>
+        </div>
+
+        <!-- Form -->
+        <div id="plant-form-wrap">
+          <div class="form-card" style="max-width: 540px;">
+
+            <form
+              id="plant-form"
+              name="plant-request"
+              method="POST"
+              data-netlify="true"
+              data-netlify-honeypot="bot-field"
+              novalidate
+            >
+              <!-- Netlify hidden field -->
+              <input type="hidden" name="form-name" value="plant-request">
+              <!-- Honeypot field — hidden from real users -->
+              <div style="display:none" aria-hidden="true">
+                <label>Don't fill this out: <input name="bot-field"></label>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="community-name">
+                  What do you want to call your community?
+                </label>
+                <span class="form-hint">
+                  This will be part of your link —
+                  something like "Solomons Island" or "Eastside Neighbors."
+                  Keep it simple and recognizable.
+                </span>
+                <input
+                  type="text"
+                  id="community-name"
+                  name="community_name"
+                  class="input"
+                  placeholder="e.g. Solomons Island"
+                  autocomplete="off"
+                  required
+                >
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="location">
+                  Where is your community?
+                </label>
+                <span class="form-hint">
+                  Zip code or town name is fine. We just need to know
+                  which area this board will serve.
+                </span>
+                <input
+                  type="text"
+                  id="location"
+                  name="location"
+                  class="input"
+                  placeholder="e.g. 20688 or Solomons Island, MD"
+                  autocomplete="postal-code"
+                  required
+                >
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="email">
+                  Your email address
+                </label>
+                <span class="form-hint">
+                  We'll send your community link and a printable flyer here.
+                  We won't put you on any mailing list.
+                </span>
+                <input
+                  type="email"
+                  id="email"
+                  name="email"
+                  class="input"
+                  placeholder="you@example.com"
+                  autocomplete="email"
+                  required
+                >
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="first-name">
+                  Your first name
+                  <span class="form-optional">(optional)</span>
+                </label>
+                <span class="form-hint">So we know what to call you in our reply.</span>
+                <input
+                  type="text"
+                  id="first-name"
+                  name="first_name"
+                  class="input"
+                  placeholder="e.g. Sarah"
+                  autocomplete="given-name"
+                >
+              </div>
+
+              <button type="submit" class="btn-primary btn-full" id="plant-submit">
+                Plant My Community 🌱
+              </button>
+
+              <p class="field-hint" style="text-align:center;margin-top:.65rem">
+                Free. Always. We'll be in touch within 24–48 hours.
+              </p>
+
+            </form>
+          </div>
+
+          <!-- What happens next -->
+          <div style="max-width:540px;margin-top:2rem">
+            <h3 style="font-family:var(--font-heading);color:var(--green-deep);margin-bottom:.75rem;font-size:1.05rem">
+              What happens after you submit?
+            </h3>
+            <ol style="padding-left:1.5rem;color:var(--ink-mid);font-size:.9rem;line-height:1.8">
+              <li>We get your request and set up your community's website.</li>
+              <li>We email you the link and a printable QR code flyer.</li>
+              <li>You share the flyer with your neighbors — library, post office, wherever people gather.</li>
+              <li>Neighbors find the board, start posting, and the community takes it from there.</li>
+            </ol>
+            <p style="margin-top:.9rem;font-size:.85rem;color:var(--ink-light);font-style:italic">
+              Most communities are up and running within 24–48 hours.
+            </p>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ─── FOOTER ──────────────────────────────────────────────────────────── -->
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div>
+          <div class="footer-brand">
+            <img src="assets/logo.svg" alt="" class="footer-logo-mark" width="28" height="33">
+            <span class="footer-logo-name">Root System</span>
+          </div>
+          <p class="footer-desc">
+            A free community board for neighbors. No ads, no accounts, no data collection.
+            Just people helping people.
+          </p>
+        </div>
+        <nav class="footer-nav" aria-label="Footer navigation">
+          <a href="/">Find a Community</a>
+          <a href="plant.html">Plant a Community</a>
+          <a href="about.html">About Root System</a>
+          <a href="planters-kit.html">Planter's Kit</a>
+        </nav>
+      </div>
+      <div class="footer-bottom">
+        Free to use. Free to share. No ads. No corporate owner.
+        Root System belongs to the communities that use it.
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // Pre-fill location from URL if coming from a "no results" search
+    document.addEventListener('DOMContentLoaded', () => {
+      const params = new URLSearchParams(window.location.search);
+      const loc = params.get('location');
+      if (loc) {
+        const field = document.getElementById('location');
+        if (field) field.value = decodeURIComponent(loc);
+      }
+    });
+
+    // Handle form submission via fetch (for inline success message)
+    document.getElementById('plant-form').addEventListener('submit', async function(e) {
+      e.preventDefault();
+
+      const form   = e.target;
+      const submit = document.getElementById('plant-submit');
+
+      // Basic validation — find the first empty required field and focus it
+      const required = Array.from(form.querySelectorAll('[required]'));
+      const firstEmpty = required.find(el => !el.value.trim());
+      if (firstEmpty) { firstEmpty.focus(); return; }
+
+      // Email format check
+      const emailField = form.querySelector('[type=email]');
+      if (emailField && !emailField.checkValidity()) {
+        emailField.focus();
+        return;
+      }
+
+      submit.disabled = true;
+      submit.textContent = 'Planting… 🌱';
+
+      try {
+        await fetch('/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams(new FormData(form)).toString(),
+        });
+
+        document.getElementById('plant-form-wrap').hidden = true;
+        const success = document.getElementById('plant-success');
+        success.hidden = false;
+        success.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+      } catch {
+        submit.disabled = false;
+        submit.textContent = 'Plant My Community 🌱';
+        alert('Something went wrong. Please try again in a moment, or email us directly.');
+      }
+    });
+  </script>
+
+</body>
+</html>

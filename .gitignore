@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Expo / React Native
+.expo/
+dist/
+build/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+web-build/
+android/
+ios/
+
+# Relay
+relay.db
+relay.db-shm
+relay.db-wal
+dist/
+
+# Environment files — never commit secrets
+.env
+.env.local
+.env.*.local
+
+# Claude Code project files (AI session memory, transcripts)
+.claude/
+
+# IDE
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Root System — Find Your Community</title>
+  <meta name="description" content="Find a free community board for your neighborhood — or start one. Neighbors sharing what they have and asking for what they need. No ads. No data selling.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;0,700;1,400&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#2D5016">
+  <!-- Open Graph (controls how this page looks when shared on social media) -->
+  <meta property="og:type"        content="website">
+  <meta property="og:title"       content="Root System — Find Your Community">
+  <meta property="og:description" content="A free community board where neighbors share what they have and ask for what they need. No ads. No data selling. Just neighbors.">
+  <meta property="og:url"         content="https://rootsystem.org">
+  <meta property="og:image"       content="https://rootsystem.org/assets/logo.svg">
+</head>
+<body>
+  <!-- Persistent screen reader announcement region.
+       JS writes to this instead of using aria-live on hidden/revealed elements,
+       which is unreliable across screen readers. -->
+  <div id="live-region" role="status" aria-live="polite" aria-atomic="true" class="sr-only"></div>
+
+  <noscript>
+    <div class="noscript-warning">
+      This site requires JavaScript to search for communities.
+      Please enable JavaScript in your browser settings and reload the page.
+    </div>
+  </noscript>
+
+  <!-- ─── HEADER ──────────────────────────────────────────────────────────── -->
+  <header class="site-header">
+    <div class="container">
+      <div class="header-inner">
+        <a href="/" class="site-logo" aria-label="Root System — home">
+          <img src="assets/logo.svg" alt="" class="logo-mark" width="34" height="40">
+          <div class="logo-text">
+            Root System
+            <small>Community Commons</small>
+          </div>
+        </a>
+        <nav class="site-nav" aria-label="Main navigation">
+          <a href="/" class="nav-link active" aria-current="page">Find</a>
+          <a href="about.html" class="nav-link">About</a>
+          <a href="plant.html" class="nav-link nav-link--cta">🌱 Plant One</a>
+        </nav>
+      </div>
+    </div>
+  </header>
+
+  <main>
+
+    <!-- ─── HERO + SEARCH ─────────────────────────────────────────────────── -->
+    <section class="hero" aria-labelledby="hero-heading">
+      <div class="container">
+        <p class="hero-eyebrow">Free Community Board</p>
+        <h1 class="hero-headline" id="hero-heading">
+          Your neighborhood<br>has everything it needs.
+        </h1>
+        <p class="hero-desc">
+          A free community board where neighbors share what they have
+          and ask for what they need. No ads. No data selling. Just neighbors.
+        </p>
+
+        <div class="search-box">
+          <label for="search-input" class="search-label">Where are you?</label>
+          <form class="search-row" id="search-form" role="search">
+            <input
+              type="text"
+              id="search-input"
+              name="location"
+              class="input"
+              placeholder="Zip code or town name"
+              autocomplete="off"
+              aria-label="Your zip code or town name"
+              required
+            >
+            <button type="submit" id="search-submit" class="btn-primary" disabled>
+              Loading…
+            </button>
+          </form>
+          <p class="field-hint">Your location stays in your browser — we don't store it.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── RESULTS (revealed by search.js) ──────────────────────────────── -->
+    <section id="results" hidden aria-label="Search results" aria-live="polite"></section>
+
+    <!-- ─── HOW IT WORKS ─────────────────────────────────────────────────── -->
+    <section class="section" id="how-it-works" aria-labelledby="how-heading">
+      <div class="container">
+        <span class="section-eyebrow">How it works</span>
+        <h2 id="how-heading">Simple as a bulletin board</h2>
+        <div class="how-steps">
+          <div class="how-step">
+            <span class="step-icon" aria-hidden="true">🏡</span>
+            <div class="step-text">
+              <h3>Find your community</h3>
+              <p>Search for a Root System near you. If one exists, you can start using it right away — no account needed.</p>
+            </div>
+          </div>
+          <div class="how-step">
+            <span class="step-icon" aria-hidden="true">📝</span>
+            <div class="step-text">
+              <h3>Post what you have or need</h3>
+              <p>A tool you're not using. Help moving furniture. A skill you'd like to share. Produce from your garden. Whatever your neighbors might need.</p>
+            </div>
+          </div>
+          <div class="how-step">
+            <span class="step-icon" aria-hidden="true">🤝</span>
+            <div class="step-text">
+              <h3>Connect with neighbors</h3>
+              <p>Reply directly. Make an exchange. Help each other out. That's the whole thing.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── WHAT PEOPLE SHARE ─────────────────────────────────────────────── -->
+    <section class="section section--alt" aria-labelledby="examples-heading">
+      <div class="container">
+        <span class="section-eyebrow">What people share</span>
+        <h2 id="examples-heading">From real community boards</h2>
+
+        <div class="example-posts">
+          <div class="example-post">"Giving away: kids' bike, green, 20-inch. Good shape, outgrown."</div>
+          <div class="example-post example-post--need">"Need help moving a couch this Saturday. Will feed you lunch."</div>
+          <div class="example-post">"Retired electrician — happy to help neighbors with small jobs. Just ask."</div>
+          <div class="example-post example-post--free">"Free firewood — you haul, take what you need."</div>
+          <div class="example-post example-post--need">"Looking to trade: I'll do your taxes, you help me fix my fence."</div>
+          <div class="example-post">"Can teach basic canning and food preservation. Happy to come to you."</div>
+        </div>
+
+        <div style="margin-top: 2rem; text-align: center;">
+          <a href="plant.html" class="btn-primary">
+            🌱 Start a Root System for My Community
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── BOTTOM CTA ────────────────────────────────────────────────────── -->
+    <section class="section--cta" aria-labelledby="cta-heading">
+      <div class="container">
+        <h2 id="cta-heading">Every community deserves one.</h2>
+        <p>
+          Root System is free to use and free to share.
+          No corporation owns it. No one profits from it.
+          It belongs to the people who use it.
+        </p>
+        <a href="plant.html" class="btn-primary">
+          Plant one for your neighborhood →
+        </a>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ─── FOOTER ──────────────────────────────────────────────────────────── -->
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div>
+          <div class="footer-brand">
+            <img src="assets/logo.svg" alt="" class="footer-logo-mark" width="28" height="33">
+            <span class="footer-logo-name">Root System</span>
+          </div>
+          <p class="footer-desc">
+            A free community board for neighbors. No ads, no accounts, no data collection.
+            Just people helping people.
+          </p>
+        </div>
+        <nav class="footer-nav" aria-label="Footer navigation">
+          <a href="/">Find a Community</a>
+          <a href="plant.html">Plant a Community</a>
+          <a href="about.html">About Root System</a>
+          <a href="planters-kit.html">Planter's Kit</a>
+        </nav>
+      </div>
+      <div class="footer-bottom">
+        Free to use. Free to share. No ads. No corporate owner.
+        Root System belongs to the communities that use it.
+      </div>
+    </div>
+  </footer>
+
+  <!-- Hidden Netlify form hook (needed so Netlify detects the notify-me form
+       even though it's rendered dynamically by search.js) -->
+  <form name="notify-me" data-netlify="true" data-netlify-honeypot="bot-field" hidden aria-hidden="true">
+    <input type="hidden" name="form-name" value="notify-me">
+    <input type="email" name="email">
+    <input type="text" name="location">
+    <input name="bot-field">
+  </form>
+
+  <script src="js/search.js"></script>
+</body>
+</html>
