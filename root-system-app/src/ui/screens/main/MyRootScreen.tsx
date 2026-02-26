@@ -8,7 +8,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View, Text, ScrollView, Pressable, TextInput,
-  StyleSheet, ActivityIndicator, Alert, Share,
+  StyleSheet, ActivityIndicator, Alert, Share, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -20,7 +20,7 @@ import { getExchangesForKey, getTimebankStats, getCommunityExchangeStats, getCon
 import type { TimebankStats } from '../../../db/exchanges';
 import { getKnowledgeEntries } from '../../../db/knowledge';
 import { getCoalitionsForCommunity } from '../../../db/coalitions';
-import { sign, canonicalTombstone } from '../../../crypto/keypair';
+import { sign, canonicalTombstone, exportRecoveryKey } from '../../../crypto/keypair';
 import { encryptCommunityKeyFor } from '../../../crypto/encrypt';
 import {
   onKeyRequestPending, approveCommunityKey, getCommunityKey,
@@ -76,6 +76,11 @@ export default function MyRootScreen() {
   const [seeded,         setSeeded]         = useState(false);
   const [seedLoading,    setSeedLoading]    = useState(false);
   const [blockedHandles, setBlockedHandles] = useState<string[]>([]);
+
+  // Recovery key export modal
+  const [showRecoveryModal,    setShowRecoveryModal]    = useState(false);
+  const [recoveryPassphrase,   setRecoveryPassphrase]   = useState('');
+  const [generatingRecovery,   setGeneratingRecovery]   = useState(false);
 
   // Profile edit form
   const [editHandle, setEditHandle] = useState('');
@@ -208,6 +213,29 @@ export default function MyRootScreen() {
         },
       ]
     );
+  }
+
+  // ── Recovery key export ──────────────────────────────────────────────────
+
+  async function handleExportRecovery() {
+    if (recoveryPassphrase.trim().length < 8) {
+      Alert.alert('Passphrase too short', 'Use at least 8 characters.');
+      return;
+    }
+    setGeneratingRecovery(true);
+    try {
+      const backup = await exportRecoveryKey(recoveryPassphrase.trim());
+      setShowRecoveryModal(false);
+      setRecoveryPassphrase('');
+      await Share.share({
+        message: backup,
+        title: 'Root System recovery key',
+      });
+    } catch (e) {
+      Alert.alert('Error', 'Could not generate recovery key. Try again.');
+    } finally {
+      setGeneratingRecovery(false);
+    }
   }
 
   // ── Planter: share invite code ───────────────────────────────────────────
@@ -648,6 +676,22 @@ export default function MyRootScreen() {
             unless you explicitly set up recovery.
           </Text>
 
+          <Text style={styles.settingsSectionTitle}>Recovery Key</Text>
+          <Pressable
+            style={styles.settingsAction}
+            onPress={() => setShowRecoveryModal(true)}
+          >
+            <Text style={styles.settingsActionText}>Back up your key</Text>
+            <Text style={styles.settingsActionSub}>
+              Encrypt your identity key with a passphrase and save it somewhere safe.
+              Required to restore your account if this device is lost.
+            </Text>
+          </Pressable>
+          <Text style={styles.settingsNote}>
+            Your recovery key is stored nowhere but where you put it.
+            If you lose it and lose this device, your account is unrecoverable — by design.
+          </Text>
+
           <Text style={styles.settingsSectionTitle}>Community</Text>
           {community ? (
             <>
@@ -788,6 +832,58 @@ export default function MyRootScreen() {
           </View>
         </ScrollView>
       )}
+
+      {/* ── RECOVERY KEY MODAL ─────────────────────────────────────────── */}
+      <Modal
+        visible={showRecoveryModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => { setShowRecoveryModal(false); setRecoveryPassphrase(''); }}
+      >
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => { setShowRecoveryModal(false); setRecoveryPassphrase(''); }}
+        >
+          <Pressable style={styles.recoveryBox} onPress={() => {}}>
+            <Text style={styles.recoveryTitle}>Back up your key</Text>
+            <Text style={styles.recoveryBody}>
+              Choose a strong passphrase. Your encrypted recovery key will be generated —
+              save it in your password manager, a secure note, or print it.
+            </Text>
+            <TextInput
+              style={styles.recoveryInput}
+              value={recoveryPassphrase}
+              onChangeText={setRecoveryPassphrase}
+              placeholder="Passphrase (8+ characters)"
+              placeholderTextColor={Colors.dim}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <Text style={styles.recoveryHint}>
+              Min 8 characters. This passphrase is never stored anywhere.
+              If you forget it, just create a new backup.
+            </Text>
+            <Pressable
+              style={[styles.recoveryBtn, generatingRecovery && { opacity: 0.6 }]}
+              onPress={handleExportRecovery}
+              disabled={generatingRecovery}
+            >
+              {generatingRecovery
+                ? <ActivityIndicator color={Colors.textOnDark} />
+                : <Text style={styles.recoveryBtnText}>Generate &amp; share</Text>
+              }
+            </Pressable>
+            <Pressable
+              style={styles.recoveryCancelBtn}
+              onPress={() => { setShowRecoveryModal(false); setRecoveryPassphrase(''); }}
+            >
+              <Text style={styles.recoveryCancelText}>Cancel</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
     </SafeAreaView>
   );
 }
@@ -1248,5 +1344,79 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: Typography.xs,
     color: Colors.textMuted,
+  },
+
+  // Recovery key modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: Spacing.xl,
+  },
+  recoveryBox: {
+    backgroundColor: Colors.background,
+    borderRadius: Radius.md,
+    padding: Spacing.xl,
+    width: '100%',
+    maxWidth: 380,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  recoveryTitle: {
+    fontFamily: Typography.serifBold,
+    fontWeight: 'bold',
+    fontSize: Typography.lg,
+    color: Colors.text,
+    marginBottom: Spacing.sm,
+  },
+  recoveryBody: {
+    fontFamily: Typography.body,
+    fontSize: Typography.sm,
+    color: Colors.textMuted,
+    lineHeight: 20,
+    marginBottom: Spacing.md,
+  },
+  recoveryInput: {
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: Radius.sm,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm + 2,
+    fontFamily: Typography.body,
+    fontSize: Typography.base,
+    color: Colors.text,
+    marginBottom: Spacing.xs,
+  },
+  recoveryHint: {
+    fontFamily: Typography.bodyItalic,
+    fontStyle: 'italic',
+    fontSize: Typography.xs,
+    color: Colors.dim,
+    lineHeight: 16,
+    marginBottom: Spacing.md,
+  },
+  recoveryBtn: {
+    backgroundColor: Colors.primary,
+    paddingVertical: Spacing.sm + 2,
+    borderRadius: Radius.sm,
+    alignItems: 'center',
+    marginBottom: Spacing.sm,
+  },
+  recoveryBtnText: {
+    fontFamily: Typography.serifBold,
+    fontWeight: 'bold',
+    fontSize: Typography.base,
+    color: Colors.textOnDark,
+  },
+  recoveryCancelBtn: {
+    alignItems: 'center',
+    paddingVertical: Spacing.xs,
+  },
+  recoveryCancelText: {
+    fontFamily: Typography.body,
+    fontSize: Typography.sm,
+    color: Colors.dim,
   },
 } as const);

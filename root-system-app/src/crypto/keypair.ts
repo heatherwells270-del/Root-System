@@ -10,7 +10,9 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import * as ed from '@noble/ed25519';
-import { sha512 } from '@noble/hashes/sha2.js';
+import { sha256, sha512 } from '@noble/hashes/sha2.js';
+import { pbkdf2 } from '@noble/hashes/pbkdf2';
+import { gcm } from '@noble/ciphers/aes';
 import * as SecureStore from 'expo-secure-store';
 import * as Crypto from 'expo-crypto';
 import type { PublicKeyHex, Signature } from '../models/types';
@@ -146,6 +148,81 @@ export function canonicalCommunity(community: {
 
 export function canonicalTombstone(postId: string, authorPublicKey: string): string {
   return `tombstone:${postId}:${authorPublicKey}`;
+}
+
+// ─── RECOVERY KEY ──────────────────────────────────────────────────────────
+
+/**
+ * Encrypt this device's private key with a user-supplied passphrase and return
+ * a portable backup string that can be saved anywhere (password manager,
+ * printed QR, etc.).
+ *
+ * Format: rsrc_v1:<base64 salt>:<base64 nonce+ciphertext>
+ *   - salt  (16 bytes) — random, used for PBKDF2 key derivation
+ *   - nonce (12 bytes) — random, prepended to ciphertext
+ *   - ciphertext + GCM auth tag (32 + 16 bytes)
+ *
+ * Key derivation: PBKDF2-SHA256, 100 000 iterations, 32-byte output.
+ * Encryption: AES-256-GCM (tag appended by noble/ciphers).
+ */
+export async function exportRecoveryKey(passphrase: string): Promise<string> {
+  const privateKeyHex = await SecureStore.getItemAsync(SECURE_STORE_KEY);
+  if (!privateKeyHex) throw new Error('No private key found. Identity not initialized.');
+
+  const saltBytes  = new Uint8Array(await Crypto.getRandomBytesAsync(16));
+  const nonceBytes = new Uint8Array(await Crypto.getRandomBytesAsync(12));
+
+  const derivedKey  = pbkdf2(sha256, passphrase, saltBytes, { c: 100_000, dkLen: 32 });
+  const cipher      = gcm(derivedKey, nonceBytes);
+  const ciphertext  = cipher.encrypt(new TextEncoder().encode(privateKeyHex));
+
+  // Prepend nonce to ciphertext so the restore function has everything in one blob
+  const combined = new Uint8Array(nonceBytes.length + ciphertext.length);
+  combined.set(nonceBytes, 0);
+  combined.set(ciphertext, nonceBytes.length);
+
+  const saltB64    = btoa(String.fromCharCode(...saltBytes));
+  const combinedB64 = btoa(String.fromCharCode(...combined));
+  return `rsrc_v1:${saltB64}:${combinedB64}`;
+}
+
+/**
+ * Restore a private key from a backup string produced by exportRecoveryKey.
+ * Stores the key in SecureStore and returns the derived public key.
+ * Throws if the backup string is malformed or the passphrase is wrong.
+ */
+export async function restoreFromRecoveryKey(
+  backupStr: string,
+  passphrase: string,
+): Promise<PublicKeyHex> {
+  const parts = backupStr.trim().split(':');
+  if (parts.length !== 3 || parts[0] !== 'rsrc_v1') {
+    throw new Error('Invalid recovery key format. Make sure you pasted the full string.');
+  }
+
+  const saltBytes  = Uint8Array.from(atob(parts[1]), c => c.charCodeAt(0));
+  const combined   = Uint8Array.from(atob(parts[2]), c => c.charCodeAt(0));
+  const nonceBytes = combined.slice(0, 12);
+  const ciphertext = combined.slice(12);
+
+  const derivedKey = pbkdf2(sha256, passphrase, saltBytes, { c: 100_000, dkLen: 32 });
+  const cipher     = gcm(derivedKey, nonceBytes);
+
+  let privateKeyHex: string;
+  try {
+    privateKeyHex = new TextDecoder().decode(cipher.decrypt(ciphertext));
+  } catch {
+    throw new Error('Incorrect passphrase or corrupted backup.');
+  }
+
+  // Validate: must be exactly 64 lowercase hex characters (32 bytes)
+  if (!/^[0-9a-f]{64}$/.test(privateKeyHex)) {
+    throw new Error('Incorrect passphrase or corrupted backup.');
+  }
+
+  await SecureStore.setItemAsync(SECURE_STORE_KEY, privateKeyHex);
+  const publicKey = await ed.getPublicKeyAsync(hexToBytes(privateKeyHex));
+  return bytesToHex(publicKey);
 }
 
 // ─── DEVICE ID ─────────────────────────────────────────────────────────────

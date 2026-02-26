@@ -70,11 +70,9 @@ Security analysis: [V3-Threat-Model.md](./V3-Threat-Model.md)
 - **Block list** — block a neighbor from their post; blocked handles filtered from your feed
 - **My Root** — profile, settings, blocked neighbors list, demo seed data, full data export/delete
 - **Relay server** — WebSocket server with Docker support, heartbeat keep-alive, blob size limits, membership guards
-
-### Up Next
-- **WebRTC peer-to-peer sync** — device-to-device sync when relay is unavailable (Phase 4)
-- **Contact reveal** — encrypted handshake to share contact info directly between members (Phase 5)
-- **Recovery key** — opt-in encrypted backup of identity key (Phase 6)
+- **WebRTC peer-to-peer sync** — direct device-to-device sync when relay is unavailable; graceful degradation in Expo Go
+- **Contact reveal** — encrypted handshake to share contact info directly between two members; never stored on relay
+- **Recovery key** — opt-in passphrase-protected backup of identity key (PBKDF2-SHA256 + AES-256-GCM); restore on any device
 
 ---
 
@@ -134,6 +132,7 @@ Set `EXPO_PUBLIC_RELAY_URL=wss://your-relay-host.com` for production builds.
 - Data lives in local SQLite on your device. The relay holds only encrypted blobs it cannot read.
 - Contact information is never transmitted in plain text — it travels only as an encrypted blob addressed to a specific recipient's public key.
 - Location is approximate — neighborhood precision, never exact coordinates.
+- Recovery key backup is entirely opt-in. It is a passphrase-encrypted export you save yourself — we never store it.
 - You can export all your data or delete everything at any time from My Root → Settings.
 
 For high-risk situations, users should consider [Tor Browser](https://www.torproject.org) and [EFF's Surveillance Self-Defense guide](https://ssd.eff.org).

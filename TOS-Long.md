@@ -220,6 +220,8 @@ Root System uses end-to-end encryption throughout. The key things to understand:
 
 - The relay holds encrypted blobs for up to 48 hours, then discards them. Your community's history survives on member devices, not on a server.
 
+- **Recovery key backup** is opt-in and entirely user-controlled. If you choose to back up your identity key, your private key is encrypted on your device using PBKDF2-SHA256 (100,000 iterations) and AES-256-GCM before you export it. The resulting backup string is never transmitted to or stored by the relay or any server — you save it yourself, wherever you choose (a password manager, a printed QR code, a secure note). The platform has no copy of it and cannot recover your identity for you.
+
 This architecture means that the strongest form of user privacy protection is built into the system structurally, not enforced by policy alone.
 
 ### 7.4 Time Banking and Taxes

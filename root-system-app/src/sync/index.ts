@@ -11,9 +11,9 @@
 //   - Store/retrieve community key in SecureStore
 //   - Surface key-request-pending events to the planter's UI
 //
-// What this does NOT do:
-//   - WebRTC peer connections (Phase 4 — device-to-device sync)
-//     TODO Phase 4: wire up react-native-webrtc after relay sync is stable
+// WebRTC peer-to-device sync (Phase 4):
+//   - Activated automatically after expo prebuild (native module required)
+//   - Degrades gracefully in Expo Go (relay buffer used as sole transport)
 //
 // Usage:
 //   await startSync(communityId)     // call on app foreground / community switch
@@ -23,6 +23,7 @@
 
 import * as SecureStore from 'expo-secure-store';
 import { RelayClient } from './relay';
+import { WebRTCPeerManager } from './webrtc';
 import { getIdentity } from '../db/identity';
 import { getCommunity } from '../db/communities';
 import { upsertPost } from '../db/posts';
@@ -65,6 +66,7 @@ export interface SyncStatus {
 
 let _relay: RelayClient | null = null;
 let _activeCommunityId: string | null = null;
+let _webrtc: WebRTCPeerManager | null = null;
 
 // Callbacks registered by app screens
 const _onCommunityKeyCallbacks: Array<(communityId: string, planterPublicKey: string) => void> = [];
@@ -117,9 +119,21 @@ export async function startSync(communityId: string): Promise<void> {
   _relay = relay;
   _activeCommunityId = communityId;
 
+  // ── WebRTC peer signaling ──────────────────────────────────────────────────
+  relay.on('peers',        (msg) => _webrtc?.initFromPeerList(msg['peers'] ?? []));
+  relay.on('peer-joined',  (msg) => _webrtc?.onPeerJoined(msg['sessionId'], msg['publicKey']));
+  relay.on('offer',        (msg) => { void _webrtc?.onOffer(msg['from'], msg['sdp']); });
+  relay.on('answer',       (msg) => { void _webrtc?.onAnswer(msg['from'], msg['sdp']); });
+  relay.on('ice',          (msg) => { void _webrtc?.onIce(msg['from'], msg['candidate']); });
+
   // ── On auth complete ───────────────────────────────────────────────────────
   relay.on('_authed', () => {
     relay.join(communityId, {});
+
+    // Initialise WebRTC peer manager (no-op if native module not available)
+    _webrtc?.stop();
+    _webrtc = new WebRTCPeerManager(relay, identity.publicKey, communityId,
+      () => getCommunityKey(communityId));
 
     // Pull any buffered posts we haven't processed yet
     getLastPullAt(communityId)
@@ -254,6 +268,8 @@ export async function startSync(communityId: string): Promise<void> {
 }
 
 export function stopSync(): void {
+  _webrtc?.stop();
+  _webrtc = null;
   _relay?.stop();
   _relay = null;
   _activeCommunityId = null;

@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import type { StackScreenProps } from '@react-navigation/stack';
 import type { RootStackParamList } from '../../../../App';
 import { Colors, Typography, Spacing } from '../../theme/index';
-import { generateKeypair, generateDeviceId } from '../../../crypto/keypair';
+import { generateKeypair, generateDeviceId, restoreFromRecoveryKey } from '../../../crypto/keypair';
 import { saveIdentity } from '../../../db/identity';
 import { emitAppEvent } from '../../appEvents';
 import type { Identity } from '../../../models/types';
@@ -26,6 +26,41 @@ export default function IdentityScreen({ navigation }: Props) {
   const [zip,     setZip]     = useState('');
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState<string | null>(null);
+
+  // Restore from backup
+  const [showRestore,  setShowRestore]  = useState(false);
+  const [backupStr,    setBackupStr]    = useState('');
+  const [restorePass,  setRestorePass]  = useState('');
+  const [restoring,    setRestoring]    = useState(false);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+
+  async function handleRestore() {
+    if (restoring) return;
+    setRestoring(true);
+    setRestoreError(null);
+    try {
+      const publicKey = await restoreFromRecoveryKey(backupStr.trim(), restorePass);
+      const deviceId  = await generateDeviceId();
+      const now       = new Date().toISOString();
+      const identity: Identity = {
+        publicKey,
+        deviceId,
+        createdAt:          now,
+        handle:             null,
+        bio:                null,
+        location:           null,
+        recoveryEmail:      null,
+        communityIds:       [],
+        covenantAcceptedAt: now,
+      };
+      await saveIdentity(identity);
+      emitAppEvent('identity-created');
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Restore failed. Check your backup string and passphrase.';
+      setRestoreError(msg);
+      setRestoring(false);
+    }
+  }
 
   async function handleEnter() {
     if (loading) return;
@@ -137,6 +172,60 @@ export default function IdentityScreen({ navigation }: Props) {
         <Text style={styles.skipNote}>
           You can skip everything above and still use Roots fully.
         </Text>
+
+        {/* Restore from backup */}
+        <Pressable
+          style={styles.restoreToggle}
+          onPress={() => { setShowRestore(v => !v); setRestoreError(null); }}
+          accessibilityRole="button"
+        >
+          <Text style={styles.restoreToggleText}>
+            {showRestore ? 'Cancel restore' : 'Restore from backup'}
+          </Text>
+        </Pressable>
+
+        {showRestore && (
+          <View style={styles.restoreForm}>
+            <Text style={styles.restoreFormTitle}>Restore your account</Text>
+            <Text style={styles.restoreFormHint}>
+              Paste your recovery string (starts with rsrc_v1:) and enter the passphrase you used when backing up.
+            </Text>
+            <TextInput
+              style={[styles.input, styles.restoreTextArea]}
+              value={backupStr}
+              onChangeText={setBackupStr}
+              placeholder="rsrc_v1:..."
+              placeholderTextColor={Colors.textMuted}
+              autoCapitalize="none"
+              autoCorrect={false}
+              multiline
+            />
+            <TextInput
+              style={styles.input}
+              value={restorePass}
+              onChangeText={setRestorePass}
+              placeholder="Passphrase"
+              placeholderTextColor={Colors.textMuted}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            {restoreError && (
+              <Text style={styles.errorText}>{restoreError}</Text>
+            )}
+            <Pressable
+              style={styles.restoreBtn}
+              onPress={handleRestore}
+              disabled={restoring || backupStr.trim().length === 0 || restorePass.length === 0}
+              accessibilityRole="button"
+            >
+              {restoring
+                ? <ActivityIndicator color={Colors.textOnDark} />
+                : <Text style={styles.restoreBtnText}>Restore account</Text>
+              }
+            </Pressable>
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -254,5 +343,57 @@ const styles = StyleSheet.create({
     fontSize: Typography.xs,
     color: Colors.textMuted,
     textAlign: 'center',
+  },
+  restoreToggle: {
+    alignSelf: 'center',
+    marginTop: Spacing.md,
+    paddingVertical: Spacing.xs,
+    paddingHorizontal: Spacing.sm,
+  },
+  restoreToggleText: {
+    fontFamily: Typography.body,
+    fontSize: Typography.sm,
+    color: Colors.primary,
+    textDecorationLine: 'underline',
+  },
+  restoreForm: {
+    marginTop: Spacing.md,
+    backgroundColor: Colors.surfaceAlt,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 6,
+    padding: Spacing.md,
+  },
+  restoreFormTitle: {
+    fontFamily: Typography.serif,
+    fontWeight: 'bold',
+    fontSize: Typography.md,
+    color: Colors.textMid,
+    marginBottom: Spacing.xs,
+  },
+  restoreFormHint: {
+    fontFamily: Typography.body,
+    fontStyle: 'italic',
+    fontSize: Typography.xs,
+    color: Colors.textMuted,
+    lineHeight: 16,
+    marginBottom: Spacing.md,
+  },
+  restoreTextArea: {
+    minHeight: 72,
+    textAlignVertical: 'top',
+  },
+  restoreBtn: {
+    backgroundColor: Colors.primary,
+    paddingVertical: Spacing.sm + 2,
+    borderRadius: 6,
+    alignItems: 'center',
+    marginTop: Spacing.xs,
+  },
+  restoreBtnText: {
+    fontFamily: Typography.serif,
+    fontWeight: 'bold',
+    fontSize: Typography.md,
+    color: Colors.textOnDark,
   },
 });
