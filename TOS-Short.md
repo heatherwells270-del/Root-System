@@ -15,7 +15,7 @@ There is a human being on the other end of every post, every exchange, every mes
 
 **By entering and posting, you agree:**
 
-You are here to help neighbors, share what you have, ask for what you need, and protect everyone in this space. Not to profit from them. Not to exploit them. Not to collect their information for any purpose other than the exchange you are making.
+You are 18 or older. You are here to help neighbors, share what you have, ask for what you need, and protect everyone in this space. Not to profit from them. Not to exploit them. Not to collect their information for any purpose other than the exchange you are making.
 
 You will meet people in public first. You will share only what you are genuinely comfortable sharing. You will not pressure anyone, create false urgency, or ask for upfront payment before any exchange occurs.
 
@@ -71,8 +71,8 @@ This platform was created in good faith, given away freely, and governed by the 
 
 ---
 
-*By clicking "I Agree and Enter," you affirm that you have read this, understand it, and will honor it.*
+*By clicking "I Agree and Enter," you affirm that you are 18 or older, that you have read this, understand it, and will honor it.*
 
 ---
 
-[Read the Full Community Agreement →](./TOS-long.md)
+[Read the Full Community Agreement →](./TOS-Long.md)

@@ -188,27 +188,43 @@ For undocumented community members: you are not required to contact law enforcem
 
 ## 7. Privacy
 
-**What we collect:** Only what you voluntarily post publicly. Your posts, the handle you choose, the zip code or zone you enter, and the contact method you choose to share.
+### 7.1 Minimum Age
 
-**What we do not collect:** Email addresses, passwords, real names, location data, device identifiers, behavioral data, or any data beyond what you choose to post.
+Root System requires users to be at least **18 years of age**. By entering and using this platform, you affirm that you are 18 or older. If you are under 18, you may not use this platform.
+
+This requirement is enforced at the point of entry through an explicit, non-bypassable confirmation step. It is not a checkbox buried in fine print. You are asked directly and must affirmatively confirm before accessing any community content.
+
+We do not knowingly allow users under 18 to access the platform. If a community steward becomes aware that a user under 18 has entered, that user should be removed. Parents or guardians with concerns should contact the community steward of the relevant deployment.
+
+### 7.2 What We Collect and Do Not Collect
+
+**What we collect:** Only what you voluntarily post publicly. Your posts, the handle you choose, the neighborhood zone you enter, and any content you contribute to the Knowledge Archive or Coalitions.
+
+**What we do not collect:** Email addresses, passwords, real names, precise location data, device identifiers, behavioral tracking data, or any data beyond what you choose to post publicly.
 
 **What we do not do:** Sell data, share data with advertisers, build user profiles, or use the content or behavior of community members to train commercial systems.
 
-**What you should know:** Posts on this platform are public. Anyone can read them. Do not post information you would not want broadly known. Use Signal or ProtonMail for private communication.
+**What you should know:** Posts on this platform are public within your community. Anyone in your community can read them. Do not post information you would not want your community to see. For communication outside the platform, use Signal or ProtonMail.
 
 **A note on anonymity:** Root System does not guarantee anonymity from network-level surveillance. For high-risk organizing, use Tor Browser and consult the EFF's Surveillance Self-Defense guide at ssd.eff.org. Honest acknowledgment of our limitations protects you better than false assurances would.
 
-### 7.1 Minimum Age
+### 7.3 Cryptographic Privacy Architecture
 
-Root System requires users to be at least **13 years of age**. By creating an account, you represent that you are 13 or older. If you are under 13, you may not use this platform.
+Root System uses end-to-end encryption throughout. The key things to understand:
 
-We do not knowingly collect personal information from children under 13. If a community steward becomes aware that a user under 13 has created an account, that account should be removed. Parents or guardians who believe their child under 13 has created an account should contact the community steward of the relevant deployment to request removal.
+- Your identity is an **Ed25519 cryptographic keypair** generated on your device. Your private key never leaves your device and is stored in hardware-backed secure storage. There is no password, no email, no account recovery — and no central authority that could be compelled to hand over your identity.
 
-This policy reflects compliance with the **Children's Online Privacy Protection Act (COPPA)**, 15 U.S.C. §§ 6501–6506. Root System does not collect personal information as defined by COPPA beyond what users voluntarily post publicly, but the 13+ minimum age applies to all users and all deployments.
+- Posts are encrypted with a **community key** (AES-256-GCM) before leaving your device. The relay server holds only encrypted blobs it cannot read. Even a compromised relay server reveals nothing about the content of community posts.
 
-### 7.2 Time Banking and Taxes
+- **Contact information** — if you choose to share it — travels only as an encrypted blob addressed to a specific recipient's public key using X25519 key exchange. It is never stored on the relay and never transmitted in plain text.
 
-The time bank feature of Root System allows community members to exchange time at a ratio of one hour to one hour, regardless of skill or background.
+- The relay holds encrypted blobs for up to 48 hours, then discards them. Your community's history survives on member devices, not on a server.
+
+This architecture means that the strongest form of user privacy protection is built into the system structurally, not enforced by policy alone.
+
+### 7.4 Time Banking and Taxes
+
+The time bank feature allows community members to exchange time at a ratio of one hour to one hour, regardless of skill or background.
 
 **This is not a financial transaction, and Root System is not a financial services platform.** However, time bank exchanges may have tax implications under U.S. federal law. The Internal Revenue Service may consider the fair market value of services received through a time bank to be taxable income. Root System does not provide tax advice. If you participate in the time bank regularly or at significant volume, consult a qualified tax professional regarding your obligations.
 
