@@ -51,6 +51,16 @@ This commons was built to last — not for a moment, not for a movement, not for
 
 ---
 
+**On privacy:**
+
+Your identity on this network is a cryptographic key generated on your device — not an account, not a username tied to your email or phone number. Your private key never leaves your device. Everything you post is encrypted before it leaves your phone. The relay server that connects members cannot read any of it.
+
+Contact information is never transmitted in plain text. If you choose to share it, it travels as an encrypted message addressed only to the recipient's key. Nothing else has access to it.
+
+Your data belongs to you. You can export or delete everything at any time.
+
+---
+
 **On safety:**
 
 If you witness or experience a safety incident through this network — exploitation, predatory behavior, trafficking, abuse — report it immediately to law enforcement or an appropriate community safety organization: a domestic violence hotline, legal aid organization, or community advocate. This commons belongs to all of us. Its safety is our collective responsibility.
@@ -71,7 +81,7 @@ This platform was created in good faith, given away freely, and governed by the 
 
 ---
 
-*By clicking "I Agree and Enter," you affirm that you are 18 or older, that you have read this, understand it, and will honor it.*
+*By tapping "I Understand and I'm Ready," you affirm that you are 18 or older, that you have read this, understand it, and will honor it.*
 
 ---
 

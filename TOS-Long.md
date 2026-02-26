@@ -5,7 +5,7 @@
 plain language where clarity matters, and human language throughout —
 because there is a human being on the other end of every interaction in this space.*
 
-*Last updated: 2026*
+*Last updated: February 2026*
 *This document may be updated by the community steward of each deployment.*
 *Changes will be noted with a date. Using the platform after a change constitutes acceptance.*
 
@@ -210,19 +210,19 @@ We do not knowingly allow users under 18 to access the platform. If a community 
 
 ### 7.3 Cryptographic Privacy Architecture
 
-Root System uses end-to-end encryption throughout. The key things to understand:
+Root System uses end-to-end encryption throughout. The architecture is fully implemented and open source — you can audit exactly what happens to your data. The key things to understand:
 
-- Your identity is an **Ed25519 cryptographic keypair** generated on your device. Your private key never leaves your device and is stored in hardware-backed secure storage. There is no password, no email, no account recovery — and no central authority that could be compelled to hand over your identity.
+- Your identity is an **Ed25519 cryptographic keypair** generated on your device. Your private key never leaves your device and is stored in hardware-backed secure storage. There is no password, no email, no account recovery via a third party — and no central authority that could be compelled to hand over your identity.
 
 - Posts are encrypted with a **community key** (AES-256-GCM) before leaving your device. The relay server holds only encrypted blobs it cannot read. Even a compromised relay server reveals nothing about the content of community posts.
 
 - **Contact information** — if you choose to share it — travels only as an encrypted blob addressed to a specific recipient's public key using X25519 key exchange. It is never stored on the relay and never transmitted in plain text.
 
-- The relay holds encrypted blobs for up to 48 hours, then discards them. Your community's history survives on member devices, not on a server.
+- The relay holds encrypted blobs for up to **48 hours**, then discards them. Your community's history survives on member devices, not on a server.
 
 - **Recovery key backup** is opt-in and entirely user-controlled. If you choose to back up your identity key, your private key is encrypted on your device using PBKDF2-SHA256 (100,000 iterations) and AES-256-GCM before you export it. The resulting backup string is never transmitted to or stored by the relay or any server — you save it yourself, wherever you choose (a password manager, a printed QR code, a secure note). The platform has no copy of it and cannot recover your identity for you.
 
-This architecture means that the strongest form of user privacy protection is built into the system structurally, not enforced by policy alone.
+This architecture means that the strongest form of user privacy protection is built into the system structurally, not enforced by policy alone. Privacy here is not a feature that can be switched off by a policy change or a court order. It is the load-bearing structure of the platform.
 
 ### 7.4 Time Banking and Taxes
 

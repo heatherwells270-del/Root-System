@@ -17,6 +17,8 @@ Post what you need. Share what you have. Keep track of who helped whom. Build so
 - **Knowledge Archive** — community-written guides, how-tos, and local know-how, searchable and voted on
 - **Community Review** — neighbors flag posts, community votes on appeals; no central moderator
 - **Trust Scores** — reputation built from time bank exchange history, shown on post cards
+- **Contact Reveal** — encrypted handshake to share contact info directly between two members; never transmitted in plain text
+- **Recovery Key** — opt-in, passphrase-protected backup of your identity key; restore your account on any device
 - **Crisis Resources** — hotlines, food assistance, legal aid, mental health support — always visible, no sign-up required
 
 ---
@@ -31,18 +33,19 @@ If your people help each other, this tool is for your people.
 
 ## Architecture
 
-Root System is a **React Native mobile app** (Expo) with a lightweight **WebSocket relay server** (Node.js). Posts and community data are stored locally on each device in SQLite — the relay is a temporary encrypted buffer, not a database.
+Root System is a **React Native mobile app** (Expo) with a lightweight **WebSocket relay server** (Node.js). Posts and community data are stored locally on each device in SQLite — the relay is a temporary encrypted buffer, not a database. When two devices are online simultaneously, WebRTC handles direct device-to-device sync without touching the relay at all.
 
 ```
 Mobile App (iOS/Android)
   └── SQLite (local storage, primary)
   └── SecureStore (Ed25519 private key, hardware-backed)
-  └── Relay Client (WebSocket, offline queue)
-         ↕  AES-256-GCM encrypted blobs only
+  └── Relay Client (WebSocket, offline push queue)
+  └── WebRTC Peer Manager (direct device-to-device sync, native build only)
+         ↕  AES-256-GCM encrypted blobs only    ↕  STUN-brokered direct channel
 Root System Relay (Node.js)
-  └── In-memory buffer (48h TTL, encrypted at rest)
+  └── In-memory buffer (48h TTL, encrypted blobs only)
   └── Community key brokering (X25519 ECDH)
-  └── Challenge-response auth (Ed25519 signatures)
+  └── Challenge-response auth + WebRTC signaling (Ed25519 signatures)
 ```
 
 **No central authority holds your data.** The relay can go offline and your community's history survives on member devices. The relay cannot read any post — everything is encrypted before it leaves your device.
@@ -54,25 +57,26 @@ Security analysis: [V3-Threat-Model.md](./V3-Threat-Model.md)
 
 ## What's Built
 
-### Complete
+Everything is complete. The app compiles clean (`tsc --noEmit` exits 0) and is ready for native build.
+
 - **Identity** — Ed25519 keypair; private key stays in hardware-backed SecureStore, never transmitted
+- **Recovery key** — opt-in passphrase-protected backup (PBKDF2-SHA256 + AES-256-GCM); restore on any device
 - **Encryption** — AES-256-GCM relay buffer; X25519 ECDH community key distribution
 - **Sync** — delta sync with watermarks, offline push queue, real-time sync status badge
+- **WebRTC sync** — direct device-to-device sync when relay is unavailable; graceful degradation in Expo Go (relay-only mode)
 - **Community flow** — create or join a community with invite codes; planter approves members
 - **Covenant gate** — 18+ confirmation, community compact, crisis resources before entry
 - **Browse** — post feed with type/category filters, keyword watches, trust score display
-- **Post** — three-card type selector (Need / Offer / Both), safety screening, relay push
+- **Post** — three-card type selector (Need / Offer / Both), client-side safety screening, relay push
 - **Time Bank** — balance tracking, exchange log, mutual confirmation, dispute flow, 48h auto-expire
 - **Community Review** — flagging, 3-flag auto-remove, appeals, community vote to restore
+- **Contact reveal** — encrypted handshake to share contact info directly between members; never stored on relay
 - **Coalitions** — sub-groups within a community: create, join, leave, archive
 - **Knowledge Archive** — community guides: post, vote helpful, flag, search
-- **Trust Scores** — computed from exchange history, displayed on post cards
+- **Trust scores** — computed from exchange history, displayed on post cards
 - **Block list** — block a neighbor from their post; blocked handles filtered from your feed
-- **My Root** — profile, settings, blocked neighbors list, demo seed data, full data export/delete
+- **My Root** — profile, settings, blocked list, demo seed data, full data export/delete
 - **Relay server** — WebSocket server with Docker support, heartbeat keep-alive, blob size limits, membership guards
-- **WebRTC peer-to-peer sync** — direct device-to-device sync when relay is unavailable; graceful degradation in Expo Go
-- **Contact reveal** — encrypted handshake to share contact info directly between two members; never stored on relay
-- **Recovery key** — opt-in passphrase-protected backup of identity key (PBKDF2-SHA256 + AES-256-GCM); restore on any device
 
 ---
 
@@ -104,7 +108,16 @@ A `.env.local.example` file is included in the repo as a template.
 
 **Requirements:**
 - Node.js 22.5+ (required for `node:sqlite`)
-- Expo Go app on Android or iOS
+- Expo Go app on Android or iOS for quick development
+
+**WebRTC (device-to-device sync):**
+WebRTC requires the `react-native-webrtc` native module, which is not bundled in Expo Go. In Expo Go the app runs in relay-only mode — WebRTC is silently disabled and everything else works normally. To enable direct device-to-device sync, run a native build:
+
+```bash
+cd root-system-app
+npx expo prebuild
+npx expo run:android   # or expo run:ios
+```
 
 ### Deploying Your Own Relay
 
@@ -127,12 +140,13 @@ Set `EXPO_PUBLIC_RELAY_URL=wss://your-relay-host.com` for production builds.
 - No accounts. No emails collected. No passwords.
 - No tracking, analytics, cookies, or behavioral data.
 - No ads. Structurally prohibited by the license.
-- Private key never leaves your device (stored in hardware-backed SecureStore).
-- Posts are public within your community by design — this is a community board.
-- Data lives in local SQLite on your device. The relay holds only encrypted blobs it cannot read.
-- Contact information is never transmitted in plain text — it travels only as an encrypted blob addressed to a specific recipient's public key.
+- Your private key never leaves your device. It is stored in hardware-backed SecureStore and is never transmitted anywhere.
+- All posts are encrypted with a community key (AES-256-GCM) before leaving your device. The relay holds only encrypted blobs it cannot read.
+- Contact information is never transmitted in plain text — it travels only as an encrypted blob addressed to a specific recipient's public key via X25519 key exchange.
+- Recovery key backup is entirely opt-in. It is a passphrase-encrypted string you save yourself — the platform never holds a copy.
+- Posts are public within your community by design — this is a community board, not a private inbox.
 - Location is approximate — neighborhood precision, never exact coordinates.
-- Recovery key backup is entirely opt-in. It is a passphrase-encrypted export you save yourself — we never store it.
+- The relay discards all data after 48 hours. Your community's history lives on member devices, not on a server.
 - You can export all your data or delete everything at any time from My Root → Settings.
 
 For high-risk situations, users should consider [Tor Browser](https://www.torproject.org) and [EFF's Surveillance Self-Defense guide](https://ssd.eff.org).
