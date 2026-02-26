@@ -16,7 +16,7 @@ import {
   StyleSheet, ActivityIndicator, Alert, TextInput, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { Colors, Typography, Spacing, Radius, CardShadow } from '../../theme/index';
 import { getIdentity } from '../../../db/identity';
 import { flagPost } from '../../../db/posts';
@@ -65,6 +65,7 @@ function relativeDate(iso: string): string {
 type Tab = 'flagged' | 'removed' | 'signals';
 
 export default function ReviewScreen() {
+  const navigation = useNavigation();
   const [tab, setTab]              = useState<Tab>('flagged');
   const [loading, setLoading]      = useState(true);
   const [identity, setIdentity]    = useState<Awaited<ReturnType<typeof getIdentity>>>(null);
@@ -237,6 +238,11 @@ export default function ReviewScreen() {
       )}
       {/* Header */}
       <View style={styles.header}>
+        {navigation.canGoBack() && (
+          <Pressable style={styles.backBtn} onPress={() => navigation.goBack()} accessibilityRole="button" accessibilityLabel="Go back">
+            <Text style={styles.backBtnText}>← Back</Text>
+          </Pressable>
+        )}
         <Text style={styles.headerTitle}>Community Review</Text>
         <Text style={styles.headerSub}>
           No admins. The community decides together.
@@ -560,6 +566,16 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.sm,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
+  },
+  backBtn: {
+    marginBottom: Spacing.xs,
+    alignSelf: 'flex-start',
+  },
+  backBtnText: {
+    fontFamily: Typography.body,
+    fontWeight: '600',
+    fontSize: Typography.sm,
+    color: Colors.primary,
   },
   headerTitle: {
     fontFamily: Typography.serif,
