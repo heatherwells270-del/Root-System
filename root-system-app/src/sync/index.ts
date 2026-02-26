@@ -24,9 +24,11 @@
 import * as SecureStore from 'expo-secure-store';
 import { RelayClient } from './relay';
 import { getIdentity } from '../db/identity';
+import { getCommunity } from '../db/communities';
 import { upsertPost } from '../db/posts';
 import { getLastPullAt, setLastPullAt } from '../db/sync';
-import { encryptForBuffer, decryptFromBuffer } from '../crypto/encrypt';
+import { saveReveal } from '../db/contact_info';
+import { encryptForBuffer, decryptFromBuffer, decryptCommunityKey, encryptForRecipient, decryptFromSender } from '../crypto/encrypt';
 import { verify, canonicalPost } from '../crypto/keypair';
 import type { Post } from '../models/types';
 
@@ -52,14 +54,47 @@ export async function storeCommunityKey(communityId: string, keyBase64: string):
   await SecureStore.setItemAsync(ckKey(communityId), keyBase64);
 }
 
+// ─── SYNC STATUS ──────────────────────────────────────────────────────────────
+
+export interface SyncStatus {
+  connected: boolean;
+  queued: number;
+}
+
 // ─── SINGLETON ────────────────────────────────────────────────────────────────
 
 let _relay: RelayClient | null = null;
 let _activeCommunityId: string | null = null;
 
 // Callbacks registered by app screens
-const _onCommunityKeyCallbacks: Array<(communityId: string, encryptedKey: string) => void> = [];
+const _onCommunityKeyCallbacks: Array<(communityId: string, planterPublicKey: string) => void> = [];
 const _onKeyRequestCallbacks:   Array<(communityId: string, requesterPublicKey: string) => void> = [];
+const _onSyncStatusCallbacks:   Array<(status: SyncStatus) => void> = [];
+
+export interface IncomingContactRequest {
+  requestId: string;
+  communityId: string;
+  requesterPublicKey: string;
+  requesterHandle: string;
+  postId: string;
+  postTitle: string;
+}
+const _onContactRequestCallbacks: Array<(req: IncomingContactRequest) => void> = [];
+const _onContactResponseCallbacks: Array<(postId: string) => void> = [];
+const _onContactDeclinedCallbacks: Array<(postId: string) => void> = [];
+
+// Posts queued while the relay is disconnected — flushed on next auth.
+// Capped to prevent unbounded memory growth during long offline periods.
+const MAX_PENDING_PUSHES = 100;
+const _pendingPushes: Post[] = [];
+
+function _emitSyncStatus(connected: boolean): void {
+  const status: SyncStatus = { connected, queued: _pendingPushes.length };
+  _onSyncStatusCallbacks.forEach(cb => {
+    try { cb(status); }
+    catch (e) { console.error('[sync] onSyncStatus callback threw', e); }
+  });
+}
 
 // ─── LIFECYCLE ────────────────────────────────────────────────────────────────
 
@@ -95,6 +130,15 @@ export async function startSync(communityId: string): Promise<void> {
     getCommunityKey(communityId).then(key => {
       if (!key) void relay.requestCommunityKey(communityId);
     }).catch(() => {});
+
+    // Flush posts that were saved while the relay was disconnected
+    if (_pendingPushes.length > 0) {
+      const toFlush = _pendingPushes.splice(0);
+      for (const post of toFlush) {
+        void pushPostToRelay(post);
+      }
+    }
+    _emitSyncStatus(true);
   });
 
   // ── Buffer items received ──────────────────────────────────────────────────
@@ -107,12 +151,41 @@ export async function startSync(communityId: string): Promise<void> {
   });
 
   // ── Community key received ─────────────────────────────────────────────────
-  // The key arrives encrypted to this device's public key. The app (e.g. the
-  // community join screen) must call decryptCommunityKey() + storeCommunityKey().
+  // The key arrives encrypted to this device's public key.
+  // Auto-decrypted and stored here so no UI screen needs to be mounted.
+  //
+  // SECURITY: We verify planterPublicKey matches the community record before
+  // performing X25519 ECDH. Without this check, a malicious relay operator could
+  // inject a `community-key` message with their own keypair as planterPublicKey,
+  // causing this device to store an attacker-controlled community key and
+  // encrypt all subsequent posts with it (key substitution attack).
   relay.on('community-key', (msg) => {
-    const encryptedKey = msg['encryptedKey'] as string;
-    if (!encryptedKey) return;
-    _onCommunityKeyCallbacks.forEach(cb => cb(communityId, encryptedKey));
+    const encryptedKey     = msg['encryptedKey']     as string;
+    const planterPublicKey = msg['planterPublicKey'] as string;
+    if (!encryptedKey || !planterPublicKey) return;
+
+    getCommunity(communityId)
+      .then(community => {
+        if (!community) {
+          console.warn('[sync] community-key rejected: community record not found locally');
+          return null;
+        }
+        if (community.planterPublicKey !== planterPublicKey) {
+          console.warn('[sync] community-key rejected: planterPublicKey mismatch — possible key substitution attack');
+          return null;
+        }
+        return decryptCommunityKey(encryptedKey, planterPublicKey);
+      })
+      .then(keyBase64 => {
+        if (!keyBase64) return;
+        return storeCommunityKey(communityId, keyBase64).then(() => {
+          _onCommunityKeyCallbacks.forEach(cb => {
+            try { cb(communityId, planterPublicKey); }
+            catch (e) { console.error('[sync] onCommunityKey callback threw', e); }
+          });
+        });
+      })
+      .catch(err => console.warn('[sync] failed to decrypt community key', err));
   });
 
   // ── Key request pending (planter only) ────────────────────────────────────
@@ -122,7 +195,59 @@ export async function startSync(communityId: string): Promise<void> {
     const reqCommunityId   = msg['communityId']        as string;
     const requesterPublicKey = msg['requesterPublicKey'] as string;
     if (!reqCommunityId || !requesterPublicKey) return;
-    _onKeyRequestCallbacks.forEach(cb => cb(reqCommunityId, requesterPublicKey));
+    _onKeyRequestCallbacks.forEach(cb => {
+      try { cb(reqCommunityId, requesterPublicKey); }
+      catch (e) { console.error('[sync] onKeyRequest callback threw', e); }
+    });
+  });
+
+  // ── Contact request pending (author only) ─────────────────────────────────
+  // The author's device receives this when a member taps "Contact" on their post.
+  relay.on('contact-request-pending', (msg) => {
+    const requestId          = msg['requestId']          as string;
+    const reqCommunityId     = msg['communityId']        as string;
+    const requesterPublicKey = msg['requesterPublicKey'] as string;
+    const requesterHandle    = msg['requesterHandle']    as string;
+    const postId             = msg['postId']             as string;
+    const postTitle          = msg['postTitle']          as string;
+    if (!requestId || !reqCommunityId || !requesterPublicKey || !postId) return;
+    const req: IncomingContactRequest = {
+      requestId, communityId: reqCommunityId, requesterPublicKey,
+      requesterHandle: requesterHandle ?? '', postId, postTitle: postTitle ?? '',
+    };
+    _onContactRequestCallbacks.forEach(cb => {
+      try { cb(req); }
+      catch (e) { console.error('[sync] onContactRequest callback threw', e); }
+    });
+  });
+
+  // ── Contact response received (requester side) ─────────────────────────────
+  // Arrives when the author approved the request. Decrypt and store locally.
+  relay.on('contact-response', (msg) => {
+    const postId           = msg['postId']           as string;
+    const encryptedContact = msg['encryptedContact'] as string;
+    const authorPublicKey  = msg['authorPublicKey']  as string;
+    if (!postId || !encryptedContact || !authorPublicKey) return;
+
+    decryptFromSender(encryptedContact, authorPublicKey)
+      .then(contact => saveReveal(postId, authorPublicKey, contact))
+      .then(() => {
+        _onContactResponseCallbacks.forEach(cb => {
+          try { cb(postId); }
+          catch (e) { console.error('[sync] onContactResponse callback threw', e); }
+        });
+      })
+      .catch(err => console.warn('[sync] failed to decrypt contact response', err));
+  });
+
+  // ── Contact declined (requester side) ─────────────────────────────────────
+  relay.on('contact-declined', (msg) => {
+    const postId = msg['postId'] as string;
+    if (!postId) return;
+    _onContactDeclinedCallbacks.forEach(cb => {
+      try { cb(postId); }
+      catch (e) { console.error('[sync] onContactDeclined callback threw', e); }
+    });
   });
 
   relay.start();
@@ -132,6 +257,7 @@ export function stopSync(): void {
   _relay?.stop();
   _relay = null;
   _activeCommunityId = null;
+  _emitSyncStatus(false);
 }
 
 export function getRelay(): RelayClient | null {
@@ -196,7 +322,16 @@ async function _processBufferItems(
  * No-op if relay is disconnected or community key is unavailable.
  */
 export async function pushPostToRelay(post: Post): Promise<void> {
-  if (!_relay?.isAuthed() || _activeCommunityId !== post.communityId) return;
+  if (_activeCommunityId !== post.communityId) return;
+
+  // Queue if not yet connected — will flush on next _authed event.
+  // If the queue is full, drop the oldest entry to make room.
+  if (!_relay?.isAuthed()) {
+    if (_pendingPushes.length >= MAX_PENDING_PUSHES) _pendingPushes.shift();
+    _pendingPushes.push(post);
+    _emitSyncStatus(false);
+    return;
+  }
 
   const communityKey = await getCommunityKey(post.communityId);
   if (!communityKey) return;
@@ -230,12 +365,12 @@ export async function approveCommunityKey(
 // ─── CALLBACK REGISTRATION ────────────────────────────────────────────────────
 
 /**
- * Register a callback for when this device receives a community key from the
- * relay. The caller must decrypt it and call storeCommunityKey().
+ * Register a callback for when this device successfully receives and stores a
+ * community key. Called after auto-decryption — the key is already in SecureStore.
  * Returns an unsubscribe function.
  */
 export function onCommunityKeyReceived(
-  cb: (communityId: string, encryptedKey: string) => void,
+  cb: (communityId: string, planterPublicKey: string) => void,
 ): () => void {
   _onCommunityKeyCallbacks.push(cb);
   return () => {
@@ -256,5 +391,110 @@ export function onKeyRequestPending(
   return () => {
     const i = _onKeyRequestCallbacks.indexOf(cb);
     if (i >= 0) _onKeyRequestCallbacks.splice(i, 1);
+  };
+}
+
+/**
+ * Register a callback for sync status changes (connected/queued).
+ * Fires on: relay auth, stopSync, post queued, post flush.
+ * Returns an unsubscribe function.
+ */
+export function onSyncStatusChange(cb: (status: SyncStatus) => void): () => void {
+  _onSyncStatusCallbacks.push(cb);
+  return () => {
+    const i = _onSyncStatusCallbacks.indexOf(cb);
+    if (i >= 0) _onSyncStatusCallbacks.splice(i, 1);
+  };
+}
+
+/** Returns a snapshot of the current sync status. */
+export function getSyncStatus(): SyncStatus {
+  return { connected: _relay?.isAuthed() ?? false, queued: _pendingPushes.length };
+}
+
+// ─── CONTACT SHARING ──────────────────────────────────────────────────────────
+
+/**
+ * Send a contact request to the author of a post.
+ * No-op if relay is not authenticated.
+ */
+export function sendContactRequest(
+  postId: string,
+  postTitle: string,
+  authorPublicKey: string,
+  communityId: string,
+  requestId: string,
+  requesterHandle: string,
+): void {
+  if (!_relay?.isAuthed()) return;
+  _relay.sendContactRequest(communityId, authorPublicKey, postId, postTitle, requestId, requesterHandle);
+}
+
+/**
+ * Author approves a contact request: encrypt contact info for the requester
+ * and forward via relay.
+ */
+export async function approveContactRequest(
+  postId: string,
+  requestId: string,
+  requesterPublicKey: string,
+  communityId: string,
+  contactInfo: string,
+): Promise<void> {
+  if (!_relay?.isAuthed()) throw new Error('Not connected to relay');
+  const encrypted = await encryptForRecipient(contactInfo, requesterPublicKey);
+  _relay.respondToContact(communityId, requesterPublicKey, postId, encrypted, requestId);
+}
+
+/**
+ * Author declines a contact request.
+ * No-op if relay is not authenticated.
+ */
+export function declineContactRequest(
+  postId: string,
+  requestId: string,
+  requesterPublicKey: string,
+  communityId: string,
+): void {
+  if (!_relay?.isAuthed()) return;
+  _relay.declineContact(communityId, requesterPublicKey, postId, requestId);
+}
+
+/**
+ * Register a callback for incoming contact requests (author only).
+ * Returns an unsubscribe function.
+ */
+export function onContactRequestPending(
+  cb: (req: IncomingContactRequest) => void,
+): () => void {
+  _onContactRequestCallbacks.push(cb);
+  return () => {
+    const i = _onContactRequestCallbacks.indexOf(cb);
+    if (i >= 0) _onContactRequestCallbacks.splice(i, 1);
+  };
+}
+
+/**
+ * Register a callback for when a contact response is received and stored
+ * (requester side). Called after auto-decryption — contact is in SQLite.
+ * Returns an unsubscribe function.
+ */
+export function onContactResponse(cb: (postId: string) => void): () => void {
+  _onContactResponseCallbacks.push(cb);
+  return () => {
+    const i = _onContactResponseCallbacks.indexOf(cb);
+    if (i >= 0) _onContactResponseCallbacks.splice(i, 1);
+  };
+}
+
+/**
+ * Register a callback for when a contact request was declined.
+ * Returns an unsubscribe function.
+ */
+export function onContactDeclined(cb: (postId: string) => void): () => void {
+  _onContactDeclinedCallbacks.push(cb);
+  return () => {
+    const i = _onContactDeclinedCallbacks.indexOf(cb);
+    if (i >= 0) _onContactDeclinedCallbacks.splice(i, 1);
   };
 }

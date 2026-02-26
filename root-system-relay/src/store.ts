@@ -78,6 +78,39 @@ export function initDb(): void {
     PRIMARY KEY (community_id, requester_public_key)
   );
 
+  -- ─── CONTACT REQUEST QUEUE ─────────────────────────────────────────────────
+  -- When a member requests contact for a post and the author is offline,
+  -- the request is queued here until the author reconnects.
+  -- TTL: 7 days. After that, the requester can re-request.
+  CREATE TABLE IF NOT EXISTS contact_request_queue (
+    id                   TEXT    PRIMARY KEY,
+    community_id         TEXT    NOT NULL,
+    author_public_key    TEXT    NOT NULL,
+    requester_public_key TEXT    NOT NULL,
+    requester_handle     TEXT    NOT NULL,
+    post_id              TEXT    NOT NULL,
+    post_title           TEXT    NOT NULL,
+    requested_at         TEXT    NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_crq_author ON contact_request_queue(author_public_key);
+
+  -- ─── CONTACT RESPONSE QUEUE ────────────────────────────────────────────────
+  -- When an author approves a request and the requester is offline,
+  -- the encrypted response is queued here until the requester reconnects.
+  -- TTL: 48 hours.
+  CREATE TABLE IF NOT EXISTS contact_response_queue (
+    id                   TEXT    PRIMARY KEY,
+    community_id         TEXT    NOT NULL,
+    requester_public_key TEXT    NOT NULL,
+    post_id              TEXT    NOT NULL,
+    encrypted_contact    TEXT    NOT NULL,
+    author_public_key    TEXT    NOT NULL,
+    responded_at         TEXT    NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_creq_requester ON contact_response_queue(requester_public_key);
+
   `);
 }
 
@@ -201,6 +234,105 @@ export function cleanKeyRequests(): void {
   // Expire requests older than 7 days
   const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
   db.prepare('DELETE FROM key_request_queue WHERE requested_at < ?').run(cutoff);
+}
+
+// ─── CONTACT REQUEST QUEUE ───────────────────────────────────────────────────
+
+export function enqueueContactRequest(
+  id: string,
+  communityId: string,
+  authorPublicKey: string,
+  requesterPublicKey: string,
+  requesterHandle: string,
+  postId: string,
+  postTitle: string,
+): void {
+  db.prepare(`
+    INSERT INTO contact_request_queue
+      (id, community_id, author_public_key, requester_public_key, requester_handle, post_id, post_title, requested_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO NOTHING
+  `).run(id, communityId, authorPublicKey, requesterPublicKey, requesterHandle, postId, postTitle, new Date().toISOString());
+}
+
+export function getPendingContactRequests(
+  authorPublicKey: string,
+): Array<{
+  id: string; communityId: string; requesterPublicKey: string;
+  requesterHandle: string; postId: string; postTitle: string;
+}> {
+  return (db.prepare(`
+    SELECT id, community_id, requester_public_key, requester_handle, post_id, post_title
+    FROM contact_request_queue
+    WHERE author_public_key = ?
+    ORDER BY requested_at ASC
+  `).all(authorPublicKey) as Array<{
+    id: string; community_id: string; requester_public_key: string;
+    requester_handle: string; post_id: string; post_title: string;
+  }>).map(r => ({
+    id: r.id,
+    communityId: r.community_id,
+    requesterPublicKey: r.requester_public_key,
+    requesterHandle: r.requester_handle,
+    postId: r.post_id,
+    postTitle: r.post_title,
+  }));
+}
+
+export function clearContactRequest(id: string): void {
+  db.prepare('DELETE FROM contact_request_queue WHERE id = ?').run(id);
+}
+
+export function cleanContactRequests(): void {
+  const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  db.prepare('DELETE FROM contact_request_queue WHERE requested_at < ?').run(cutoff);
+}
+
+// ─── CONTACT RESPONSE QUEUE ──────────────────────────────────────────────────
+
+export function enqueueContactResponse(
+  id: string,
+  communityId: string,
+  requesterPublicKey: string,
+  postId: string,
+  encryptedContact: string,
+  authorPublicKey: string,
+): void {
+  db.prepare(`
+    INSERT INTO contact_response_queue
+      (id, community_id, requester_public_key, post_id, encrypted_contact, author_public_key, responded_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO NOTHING
+  `).run(id, communityId, requesterPublicKey, postId, encryptedContact, authorPublicKey, new Date().toISOString());
+}
+
+export function getPendingContactResponses(
+  requesterPublicKey: string,
+): Array<{
+  id: string; postId: string; encryptedContact: string; authorPublicKey: string;
+}> {
+  return (db.prepare(`
+    SELECT id, post_id, encrypted_contact, author_public_key
+    FROM contact_response_queue
+    WHERE requester_public_key = ?
+    ORDER BY responded_at ASC
+  `).all(requesterPublicKey) as Array<{
+    id: string; post_id: string; encrypted_contact: string; author_public_key: string;
+  }>).map(r => ({
+    id: r.id,
+    postId: r.post_id,
+    encryptedContact: r.encrypted_contact,
+    authorPublicKey: r.author_public_key,
+  }));
+}
+
+export function clearContactResponse(id: string): void {
+  db.prepare('DELETE FROM contact_response_queue WHERE id = ?').run(id);
+}
+
+export function cleanContactResponses(): void {
+  const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+  db.prepare('DELETE FROM contact_response_queue WHERE responded_at < ?').run(cutoff);
 }
 
 export { db };

@@ -1,7 +1,25 @@
 {
   "expo": {
-    "name": "root-system-app",
+    "name": "Roots",
     "slug": "root-system-app",
-    "version": "1.0.0"
+    "version": "1.0.0",
+    "icon": "./assets/logo.png",
+    "splash": {
+      "image": "./assets/logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0f1a0f"
+    },
+    "android": {
+      "package": "com.rootsystem.app",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/logo.png",
+        "backgroundColor": "#0f1a0f"
+      }
+    },
+    "ios": {
+      "bundleIdentifier": "com.rootsystem.app",
+      "buildNumber": "1"
+    }
   }
 }

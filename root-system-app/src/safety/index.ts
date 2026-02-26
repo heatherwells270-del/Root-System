@@ -19,6 +19,12 @@ const SCAM_PATTERNS = [
     msg: 'Never share personal documents through this platform.' },
   { id: 'tooGood',    regex: /\$\s*[5-9]\d{2,}|\$\s*\d{4,}|\bfree.{0,15}(iphone|laptop|car|tv|gift\s*card)/i,
     msg: 'High-value free offers from strangers deserve extra scrutiny.' },
+  { id: 'romance',    regex: /\b(you are so (beautiful|gorgeous|attractive)|fell in love|soul\s*mate|my heart|destiny|meant to be together|i love you already)\b/i,
+    msg: 'This post uses romantic language. Be cautious — romance scams are common on community platforms.' },
+  { id: 'wfh',        regex: /\b(work from home|earn \$\d+.{0,10}(day|week|hour)|passive income|financial freedom|be your own boss|unlimited earning|make money fast|side hustle opportunity)\b/i,
+    msg: 'Income opportunity claims should be verified carefully. Legitimate jobs do not require upfront fees.' },
+  { id: 'overpayment',regex: /\b(overpayment|send.{0,10}(the )?difference|cashier.{0,5}check|money order.{0,10}refund|i.ll pay more than asking|accidentally sent too much)\b/i,
+    msg: 'Overpayment / check scam warning: never send back "extra" money from a payment you received.' },
 ];
 
 export function detectScamWarnings(title: string, body: string): Warning[] {
@@ -34,6 +40,8 @@ const CRISIS_PATTERNS = [
   /\b(want to die|want to kill myself|end my life|suicidal|no reason to live|can't go on)\b/i,
   /\b(hurting myself|self.harm|cutting myself)\b/i,
   /\b(being abused|he hits me|she hits me|afraid to go home)\b/i,
+  /\b(human trafficking|sex trafficking|forced (labor|work|prostitution)|debt bondage|held against (my|their) will|can'?t leave|they took my (passport|id|phone)|working (off|to pay off) a debt)\b/i,
+  /\b(missing (person|child|teenager|girl|boy)|have you seen|last seen wearing|please (share|help find)|runaway (teen|child))\b/i,
 ];
 
 export function detectCrisis(title: string, body: string): boolean {
@@ -45,6 +53,7 @@ export const CRISIS_RESOURCES = [
   { label: '988 Suicide & Crisis Lifeline', value: '988' },
   { label: 'Crisis Text Line', value: 'Text HOME to 741741' },
   { label: 'Domestic Violence Hotline', value: '1-800-799-7233' },
+  { label: 'National Human Trafficking Hotline', value: '1-888-373-7888' },
   { label: '211 Local Services', value: '211' },
 ];
 
@@ -64,6 +73,8 @@ export function detectMinor(text: string): boolean {
 const FAIR_HOUSING_PATTERNS = [
   /\b(no (kids|children|families|section 8|vouchers|pets))\b/i,
   /\b(whites only|christians only|english only|adults only)\b/i,
+  /\b(no (wheelchair|wheelchairs|disabled|disabilities)|able.bodied only|ambulatory only|must be able.bodied|no handicap)\b/i,
+  /\b(straight (couples?|tenants?|only)|no (gay|lesbian|LGBT|LGBTQ|same.sex)|preferred.{0,10}(straight|heterosexual))\b/i,
 ];
 
 export function detectFairHousing(title: string, body: string): boolean {

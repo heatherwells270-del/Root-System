@@ -49,6 +49,9 @@ export interface Identity {
   recoveryEmail: string | null;
 
   communityIds: string[];
+
+  // ISO timestamp of covenant acceptance — set once on account creation, never changed.
+  covenantAcceptedAt: string | null;
 }
 
 // ─── POST ──────────────────────────────────────────────────────────────────

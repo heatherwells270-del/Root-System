@@ -18,6 +18,7 @@ let _db: SQLite.SQLiteDatabase | null = null;
 export async function getDb(): Promise<SQLite.SQLiteDatabase> {
   if (_db) return _db;
   _db = await SQLite.openDatabaseAsync('rootsystem.db');
+  await _db.execAsync('PRAGMA foreign_keys = ON');
   await initSchema(_db);
   return _db;
 }

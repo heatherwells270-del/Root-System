@@ -11,7 +11,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { gcm } from '@noble/ciphers/aes.js';
-import { x25519 } from '@noble/curves/ed25519.js';
+import { x25519, ed25519 } from '@noble/curves/ed25519.js';
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import * as Crypto from 'expo-crypto';
@@ -35,11 +35,19 @@ function bytesToHex(bytes: Uint8Array): string {
 }
 
 function bytesToBase64(bytes: Uint8Array): string {
-  return Buffer.from(bytes).toString('base64');
+  // btoa is available in React Native (Hermes). Buffer is NOT globally available
+  // without explicit polyfill, so we use a loop-based approach instead.
+  let binary = '';
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
 }
 
 function base64ToBytes(b64: string): Uint8Array {
-  return new Uint8Array(Buffer.from(b64, 'base64'));
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
 }
 
 async function randomBytes(n: number): Promise<Uint8Array> {
@@ -69,23 +77,11 @@ export async function encryptForRecipient(
   if (!ourPrivateHex) throw new Error('No private key found.');
 
   // Convert Ed25519 keys to X25519 (Curve25519 Montgomery form) for ECDH.
-  //
-  // PRIVATE KEY: the Ed25519 private key IS the 32-byte seed.
-  // x25519.getSharedSecret() applies key clamping internally, so the seed
-  // can be passed directly as the X25519 scalar. This is correct.
-  //
-  // PUBLIC KEY: Ed25519 and X25519 public keys use different curve representations
-  // (twisted Edwards vs Montgomery) even though they share the same underlying curve.
-  // The correct conversion requires a birational map.
-  //
-  // TODO (Phase 6 — contact reveal): Replace the public key slice with proper conversion:
-  //   import { edwardsToMontgomeryPub } from '@noble/curves/ed25519.js';
-  //   const theirX25519Public = edwardsToMontgomeryPub(hexToBytes(recipientPublicKey));
-  //
-  // Until contact reveal is wired up (post data is currently null for contactInfoEncrypted),
-  // this code path is never called in production. Fix before Phase 6 ships.
-  const ourX25519Private = hexToBytes(ourPrivateHex).slice(0, 32);
-  const theirX25519Public = hexToBytes(recipientPublicKey).slice(0, 32);
+  // Ed25519 and X25519 use different curve representations (twisted Edwards vs
+  // Montgomery) even though they share the same underlying field. The birational
+  // map between them is applied via ed25519.utils (noble/curves v2 API).
+  const ourX25519Private  = ed25519.utils.toMontgomerySecret(hexToBytes(ourPrivateHex));
+  const theirX25519Public = ed25519.utils.toMontgomery(hexToBytes(recipientPublicKey));
 
   // X25519 shared secret
   const sharedSecret = x25519.getSharedSecret(ourX25519Private, theirX25519Public);
@@ -122,8 +118,8 @@ export async function decryptFromSender(
   const nonce = packed.slice(0, 12);
   const ciphertext = packed.slice(12);
 
-  const ourX25519Private = hexToBytes(ourPrivateHex).slice(0, 32);
-  const theirX25519Public = hexToBytes(senderPublicKey).slice(0, 32);
+  const ourX25519Private  = ed25519.utils.toMontgomerySecret(hexToBytes(ourPrivateHex));
+  const theirX25519Public = ed25519.utils.toMontgomery(hexToBytes(senderPublicKey));
 
   const sharedSecret = x25519.getSharedSecret(ourX25519Private, theirX25519Public);
   const encKey = hkdf(sha256, sharedSecret, undefined, new TextEncoder().encode('rs-contact-v1'), 32);

@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// ROOT SYSTEM — Covenant Screen
+// ROOTS — Community Agreement Screen
 //
 // The gate. Must be accepted before anything else. No dark patterns —
 // every rule is readable, the checkboxes require genuine engagement,
@@ -9,7 +9,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, ScrollView, Pressable, StyleSheet,
-  ActivityIndicator,
+  ActivityIndicator, Image, Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { StackScreenProps } from '@react-navigation/stack';
@@ -18,27 +18,28 @@ import { Colors, Typography, Spacing } from '../../theme/index';
 
 type Props = StackScreenProps<RootStackParamList, 'Covenant'>;
 
-const COMPACT_RULES = [
+const AGREEMENT_VERSION = '1.0';
+const AGREEMENT_DATE    = 'February 2026';
+
+const COMMUNITY_RULES = [
   'This space is for mutual aid — give, receive, trade, teach. Not for profit.',
   'No addresses. Use neighborhoods, not street numbers. Meet in public first.',
   'No demands for upfront payment. No pressure. No urgency tactics.',
   'Use only what you actually have to offer.',
   'If something feels wrong, flag it.',
-  'This is not a marketplace, a dating platform, or a surveillance tool.',
+  'This is not a marketplace, a dating platform, a recruitment scheme, or a surveillance tool.',
 ];
 
 export default function CovenantScreen({ navigation }: Props) {
-  const [checkedCompact, setCheckedCompact]   = useState(false);
-  const [checkedAge,     setCheckedAge]       = useState(false);
-  const [loading,        setLoading]          = useState(false);
+  const [checkedRules, setCheckedRules] = useState(false);
+  const [checkedAge,   setCheckedAge]   = useState(false);
+  const [loading,      setLoading]      = useState(false);
 
-  const canEnter = checkedCompact && checkedAge;
+  const canEnter = checkedRules && checkedAge;
 
   async function handleEnter() {
     if (!canEnter || loading) return;
     setLoading(true);
-    // Covenant acceptance is implicit in identity creation —
-    // if identity exists, covenant was accepted. Navigate to identity setup.
     navigation.replace('Identity');
   }
 
@@ -50,14 +51,24 @@ export default function CovenantScreen({ navigation }: Props) {
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
-        <Text style={styles.eyebrow}>Root System</Text>
-        <Text style={styles.title}>Community Compact</Text>
-        <Text style={styles.subtitle}>Read before entering.</Text>
+        <View style={styles.logoWrap}>
+          <Image
+            source={require('../../../../assets/logo.png')}
+            style={styles.logo}
+            resizeMode="contain"
+          />
+        </View>
+        <Text style={styles.appName}>Roots</Text>
+        <Text style={styles.title}>Community Agreement</Text>
+        <View style={styles.versionRow}>
+          <Text style={styles.subtitle}>Read before continuing.</Text>
+          <Text style={styles.versionBadge}>v{AGREEMENT_VERSION} · {AGREEMENT_DATE}</Text>
+        </View>
 
         {/* Minor notice — prominent, non-dismissable */}
         <View style={styles.minorNotice}>
           <Text style={styles.minorText}>
-            Root System is for adults. If you are under 18 and need help,
+            Roots requires you to be at least 13 years old. If you are under 13,
             please reach out to a trusted adult, call{' '}
             <Text style={styles.bold}>211</Text> for local services, or text{' '}
             <Text style={styles.bold}>HOME to 741741</Text> for crisis support.
@@ -67,9 +78,9 @@ export default function CovenantScreen({ navigation }: Props) {
 
         {/* Rules */}
         <View style={styles.rulesBox}>
-          {COMPACT_RULES.map((rule, i) => (
+          {COMMUNITY_RULES.map((rule, i) => (
             <View key={i} style={styles.ruleRow}>
-              <Text style={styles.ruleDot}>✦</Text>
+              <Text style={styles.ruleDot}>·</Text>
               <Text style={styles.ruleText}>{rule}</Text>
             </View>
           ))}
@@ -79,10 +90,10 @@ export default function CovenantScreen({ navigation }: Props) {
         <View style={styles.disclosureBox}>
           <Text style={styles.disclosureTitle}>What this app stores</Text>
           <Text style={styles.disclosureText}>
-            A cryptographic keypair is generated on your device when you enter.
+            A cryptographic keypair is generated on your device when you sign up.
             It never leaves your device unless you choose to set up recovery.
             Your handle, bio, and location are optional — you choose what to share.
-            Posts you make are public to your community. Your location is
+            Posts you make are visible to your community. Your location is
             approximate (neighborhood, not street). Nothing is sold. Nothing is
             collected without your knowledge.
           </Text>
@@ -95,15 +106,15 @@ export default function CovenantScreen({ navigation }: Props) {
         {/* Checkboxes */}
         <Pressable
           style={styles.checkRow}
-          onPress={() => setCheckedCompact(v => !v)}
+          onPress={() => setCheckedRules(v => !v)}
           accessibilityRole="checkbox"
-          accessibilityState={{ checked: checkedCompact }}
+          accessibilityState={{ checked: checkedRules }}
         >
-          <View style={[styles.checkbox, checkedCompact && styles.checkboxChecked]}>
-            {checkedCompact && <Text style={styles.checkmark}>✓</Text>}
+          <View style={[styles.checkbox, checkedRules && styles.checkboxChecked]}>
+            {checkedRules && <Text style={styles.checkmark}>✓</Text>}
           </View>
           <Text style={styles.checkLabel}>
-            I have read this Compact and I enter this space in good faith
+            I have read this agreement and I'm participating in good faith
           </Text>
         </Pressable>
 
@@ -117,7 +128,7 @@ export default function CovenantScreen({ navigation }: Props) {
             {checkedAge && <Text style={styles.checkmark}>✓</Text>}
           </View>
           <Text style={styles.checkLabel}>
-            I confirm I am 18 years of age or older
+            I confirm I am 13 years of age or older
           </Text>
         </Pressable>
 
@@ -129,22 +140,30 @@ export default function CovenantScreen({ navigation }: Props) {
           accessibilityRole="button"
         >
           {loading
-            ? <ActivityIndicator color={Colors.greenDeep} />
+            ? <ActivityIndicator color={Colors.textOnDark} />
             : <Text style={[styles.enterBtnText, !canEnter && styles.enterBtnTextDisabled]}>
-                Enter the Commons
+                Get started
               </Text>
           }
         </Pressable>
 
-        {/* Crisis footer — always visible */}
+        {/* Crisis footer — always visible, all links tappable */}
         <View style={styles.crisisFooter}>
-          <Text style={styles.crisisText}>
-            Are you safe?{' '}
-            <Text style={styles.crisisLink}>thehotline.org</Text>
-            {'\n'}In crisis? <Text style={styles.bold}>988</Text> ·
-            Text HOME to <Text style={styles.bold}>741741</Text> ·
-            DV: <Text style={styles.bold}>1-800-799-7233</Text>
-          </Text>
+          <Text style={styles.crisisText}>Are you safe?</Text>
+          <View style={styles.crisisLinks}>
+            <Pressable onPress={() => void Linking.openURL('https://www.thehotline.org')} accessibilityRole="link">
+              <Text style={styles.crisisLink}>thehotline.org</Text>
+            </Pressable>
+            <Pressable onPress={() => void Linking.openURL('tel:988')} accessibilityRole="link" accessibilityLabel="988 Suicide and Crisis Lifeline">
+              <Text style={styles.crisisLink}>988 Crisis</Text>
+            </Pressable>
+            <Pressable onPress={() => void Linking.openURL('sms:741741')} accessibilityRole="link" accessibilityLabel="Crisis Text Line — text HOME to 741741">
+              <Text style={styles.crisisLink}>Text HOME → 741741</Text>
+            </Pressable>
+            <Pressable onPress={() => void Linking.openURL('tel:18007997233')} accessibilityRole="link" accessibilityLabel="Domestic Violence Hotline">
+              <Text style={styles.crisisLink}>DV: 1-800-799-7233</Text>
+            </Pressable>
+          </View>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -163,30 +182,53 @@ const styles = StyleSheet.create({
     padding: Spacing.lg,
     paddingBottom: Spacing.xxl,
   },
-  eyebrow: {
+  logoWrap: {
+    alignItems: 'center',
+    marginBottom: Spacing.lg,
+    marginTop: Spacing.sm,
+  },
+  logo: {
+    width: 120,
+    height: 120,
+  },
+  appName: {
     fontFamily: Typography.body,
+    fontWeight: '600',
     fontSize: Typography.sm,
-    color: Colors.gold,
+    color: Colors.primary,
     letterSpacing: 2,
     textTransform: 'uppercase',
     marginBottom: Spacing.xs,
   },
   title: {
-    fontFamily: Typography.serifBold,
+    fontFamily: Typography.serif,
+    fontWeight: 'bold',
     fontSize: Typography.xxl,
-    color: Colors.cream,
+    color: Colors.text,
     marginBottom: Spacing.xs,
   },
-  subtitle: {
-    fontFamily: Typography.bodyItalic,
-    fontSize: Typography.md,
-    color: Colors.dim,
+  versionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: Spacing.lg,
   },
+  subtitle: {
+    fontFamily: Typography.body,
+    fontStyle: 'italic',
+    fontSize: Typography.md,
+    color: Colors.textMuted,
+  },
+  versionBadge: {
+    fontFamily: Typography.body,
+    fontSize: Typography.xs,
+    color: Colors.textMuted,
+    letterSpacing: 0.5,
+  },
   minorNotice: {
-    backgroundColor: 'rgba(138,37,53,0.15)',
+    backgroundColor: 'rgba(166,61,61,0.08)',
     borderLeftWidth: 2,
-    borderLeftColor: Colors.wine,
+    borderLeftColor: Colors.error,
     padding: Spacing.md,
     marginBottom: Spacing.lg,
     borderRadius: 3,
@@ -194,12 +236,13 @@ const styles = StyleSheet.create({
   minorText: {
     fontFamily: Typography.body,
     fontSize: Typography.sm,
-    color: Colors.moonsilver,
+    color: Colors.text,
     lineHeight: 20,
   },
   bold: {
-    fontFamily: Typography.bodySemi,
-    color: Colors.cream,
+    fontFamily: Typography.body,
+    fontWeight: '600',
+    color: Colors.text,
   },
   rulesBox: {
     marginBottom: Spacing.lg,
@@ -210,17 +253,16 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   ruleDot: {
-    fontFamily: Typography.serif,
-    fontSize: Typography.sm,
-    color: Colors.gold,
-    marginTop: 2,
+    fontFamily: Typography.body,
+    fontSize: Typography.md,
+    color: Colors.primary,
     width: 14,
   },
   ruleText: {
     flex: 1,
     fontFamily: Typography.body,
     fontSize: Typography.base,
-    color: Colors.cream,
+    color: Colors.text,
     lineHeight: 24,
   },
   disclosureBox: {
@@ -228,19 +270,20 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
     padding: Spacing.md,
-    borderRadius: 4,
+    borderRadius: 6,
     marginBottom: Spacing.lg,
   },
   disclosureTitle: {
-    fontFamily: Typography.serifBold,
+    fontFamily: Typography.serif,
+    fontWeight: 'bold',
     fontSize: Typography.md,
-    color: Colors.gold,
+    color: Colors.textMid,
     marginBottom: Spacing.sm,
   },
   disclosureText: {
     fontFamily: Typography.body,
     fontSize: Typography.sm,
-    color: Colors.moonsilver,
+    color: Colors.textMuted,
     lineHeight: 20,
   },
   checkRow: {
@@ -253,64 +296,77 @@ const styles = StyleSheet.create({
   checkbox: {
     width: 22,
     height: 22,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: Colors.borderMid,
-    borderRadius: 3,
+    borderRadius: 4,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 1,
     flexShrink: 0,
   },
   checkboxChecked: {
-    backgroundColor: 'rgba(196,152,46,0.15)',
-    borderColor: Colors.gold,
+    backgroundColor: Colors.primaryLight,
+    borderColor: Colors.primary,
   },
   checkmark: {
-    color: Colors.gold,
+    color: Colors.primary,
     fontSize: 13,
-    fontFamily: Typography.bodySemi,
+    fontFamily: Typography.body,
+    fontWeight: '600',
   },
   checkLabel: {
     flex: 1,
     fontFamily: Typography.body,
     fontSize: Typography.base,
-    color: Colors.cream,
+    color: Colors.text,
     lineHeight: 24,
   },
   enterBtn: {
-    backgroundColor: Colors.gold,
+    backgroundColor: Colors.primary,
     paddingVertical: Spacing.md,
-    borderRadius: 4,
+    borderRadius: 6,
     alignItems: 'center',
     marginTop: Spacing.sm,
     marginBottom: Spacing.lg,
   },
   enterBtnDisabled: {
-    backgroundColor: 'rgba(196,152,46,0.2)',
+    backgroundColor: Colors.primaryLight,
   },
   enterBtnText: {
-    fontFamily: Typography.serifBold,
+    fontFamily: Typography.serif,
+    fontWeight: 'bold',
     fontSize: Typography.md,
-    color: Colors.greenDeep,
-    letterSpacing: 0.5,
+    color: Colors.textOnDark,
   },
   enterBtnTextDisabled: {
-    color: Colors.dim,
+    color: Colors.textMuted,
   },
   crisisFooter: {
     borderTopWidth: 1,
     borderTopColor: Colors.border,
     paddingTop: Spacing.md,
+    alignItems: 'center',
+    gap: Spacing.xs,
   },
   crisisText: {
     fontFamily: Typography.body,
     fontSize: Typography.xs,
-    color: Colors.dim,
+    color: Colors.textMuted,
     textAlign: 'center',
     lineHeight: 18,
   },
+  crisisLinks: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+  },
   crisisLink: {
-    color: Colors.gold,
+    fontFamily: Typography.body,
+    fontWeight: '600',
+    fontSize: Typography.xs,
+    color: Colors.secondary,
     textDecorationLine: 'underline',
+    lineHeight: 22,
   },
 });

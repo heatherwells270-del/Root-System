@@ -198,6 +198,22 @@ For undocumented community members: you are not required to contact law enforcem
 
 **A note on anonymity:** Root System does not guarantee anonymity from network-level surveillance. For high-risk organizing, use Tor Browser and consult the EFF's Surveillance Self-Defense guide at ssd.eff.org. Honest acknowledgment of our limitations protects you better than false assurances would.
 
+### 7.1 Minimum Age
+
+Root System requires users to be at least **13 years of age**. By creating an account, you represent that you are 13 or older. If you are under 13, you may not use this platform.
+
+We do not knowingly collect personal information from children under 13. If a community steward becomes aware that a user under 13 has created an account, that account should be removed. Parents or guardians who believe their child under 13 has created an account should contact the community steward of the relevant deployment to request removal.
+
+This policy reflects compliance with the **Children's Online Privacy Protection Act (COPPA)**, 15 U.S.C. §§ 6501–6506. Root System does not collect personal information as defined by COPPA beyond what users voluntarily post publicly, but the 13+ minimum age applies to all users and all deployments.
+
+### 7.2 Time Banking and Taxes
+
+The time bank feature of Root System allows community members to exchange time at a ratio of one hour to one hour, regardless of skill or background.
+
+**This is not a financial transaction, and Root System is not a financial services platform.** However, time bank exchanges may have tax implications under U.S. federal law. The Internal Revenue Service may consider the fair market value of services received through a time bank to be taxable income. Root System does not provide tax advice. If you participate in the time bank regularly or at significant volume, consult a qualified tax professional regarding your obligations.
+
+Some time banking organizations have obtained nonprofit status or IRS guidance exempting specific programs from certain tax obligations. Community stewards who operate the time bank feature at scale should seek appropriate legal and tax advice for their specific deployment.
+
 ---
 
 ## 8. Safety Incidents — Reporting Responsibility
@@ -235,7 +251,19 @@ If a version of Root System ever appears that charges money, carries ads, is bra
 
 ---
 
-## 10. Limitation of Liability
+## 10. Governing Law and Dispute Resolution
+
+**Governing law:** This agreement and any dispute arising from use of this platform are governed by the laws of the state in which the community steward of this specific deployment operates, without regard to conflict-of-law principles. For deployments without a designated community steward, the laws of the State of Oregon govern.
+
+**Dispute resolution:** Disputes between community members are addressed first through the community's own review process described in this agreement. For disputes that cannot be resolved at the community level, the parties agree to attempt good-faith informal resolution before pursuing legal action. This provision does not limit any party's right to seek emergency or injunctive relief.
+
+**Severability:** If any provision of this agreement is found to be unenforceable by a court of competent jurisdiction, the remaining provisions continue in full force and effect.
+
+**Entire agreement:** This document, together with any community-specific standards adopted by the steward of your deployment, constitutes the entire agreement between you and the platform regarding your use of Root System.
+
+---
+
+## 11. Limitation of Liability
 
 Root System is provided as-is, without warranties. The original creator and community stewards are not liable for the actions of users, safety incidents between users, outdated resources, technical failures, or any harm arising from use of the platform.
 
@@ -243,7 +271,7 @@ Use this tool wisely. Vet the people you meet. Trust your instincts. Build real 
 
 ---
 
-## 11. Why This Was Built
+## 12. Why This Was Built
 
 This was built during a period of short-term disability, with time that would otherwise have been lost, for communities that have always deserved better infrastructure.
 

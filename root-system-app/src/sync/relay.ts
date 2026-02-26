@@ -22,6 +22,7 @@ export class RelayClient {
   private sessionId: string | null = null;
   private reconnectDelay = 2000;   // ms; doubles each attempt, caps at 30 000
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private _heartbeatInterval: ReturnType<typeof setInterval> | null = null;
   private stopped = false;
   private handlers = new Map<string, MessageHandler[]>();
 
@@ -41,6 +42,7 @@ export class RelayClient {
   stop(): void {
     this.stopped = true;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    if (this._heartbeatInterval) { clearInterval(this._heartbeatInterval); this._heartbeatInterval = null; }
     this.ws?.close();
     this.ws = null;
     this.sessionId = null;
@@ -113,6 +115,14 @@ export class RelayClient {
 
     this.sessionId = authed.sessionId;
     this._dispatch('_authed', authed);   // internal event — SyncManager listens here
+
+    // Keep-alive: ping every 25s to prevent idle-timeout disconnects.
+    if (this._heartbeatInterval) clearInterval(this._heartbeatInterval);
+    this._heartbeatInterval = setInterval(() => {
+      if (this.ws?.readyState === WebSocket.OPEN) {
+        this._send({ v: PROTOCOL_VERSION, type: 'ping' });
+      }
+    }, 25_000);
   }
 
   // ─── SEND ───────────────────────────────────────────────────────────────────
@@ -139,7 +149,12 @@ export class RelayClient {
 
   private _dispatch(type: string, msg: Record<string, unknown>): void {
     const arr = this.handlers.get(type);
-    if (arr) arr.slice().forEach(fn => fn(msg));
+    if (arr) {
+      arr.slice().forEach(fn => {
+        try { fn(msg); }
+        catch (e) { console.error('[relay] message handler threw', e); }
+      });
+    }
   }
 
   /** Wait for the next message of a given type. Returns null on timeout. */
@@ -180,9 +195,10 @@ export class RelayClient {
   // ─── PHASE 5: BUFFER ───────────────────────────────────────────────────────
 
   pushToBuffer(communityId: string, encryptedBlob: string): void {
+    // pushedAt is set server-side — never trust the client's clock for buffer ordering
     this._send({
       v: PROTOCOL_VERSION, type: 'buffer-push',
-      communityId, encryptedBlob, pushedAt: new Date().toISOString(),
+      communityId, encryptedBlob,
     });
   }
 
@@ -212,6 +228,49 @@ export class RelayClient {
     this._send({
       v: PROTOCOL_VERSION, type: 'key-approve',
       communityId, requesterPublicKey, encryptedKey,
+    });
+  }
+
+  // ─── PHASE 7: CONTACT REVEAL ───────────────────────────────────────────────
+
+  sendContactRequest(
+    communityId: string,
+    authorPublicKey: string,
+    postId: string,
+    postTitle: string,
+    requestId: string,
+    requesterHandle: string,
+  ): void {
+    this._send({
+      v: PROTOCOL_VERSION, type: 'contact-request',
+      communityId, authorPublicKey, postId,
+      postTitle, requesterHandle,
+      requestId,
+    });
+  }
+
+  respondToContact(
+    communityId: string,
+    requesterPublicKey: string,
+    postId: string,
+    encryptedContact: string,
+    requestId: string,
+  ): void {
+    this._send({
+      v: PROTOCOL_VERSION, type: 'contact-respond',
+      communityId, requesterPublicKey, postId, encryptedContact, requestId,
+    });
+  }
+
+  declineContact(
+    communityId: string,
+    requesterPublicKey: string,
+    postId: string,
+    requestId: string,
+  ): void {
+    this._send({
+      v: PROTOCOL_VERSION, type: 'contact-decline',
+      communityId, requesterPublicKey, postId, requestId,
     });
   }
 }

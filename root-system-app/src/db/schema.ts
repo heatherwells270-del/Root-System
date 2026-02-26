@@ -10,7 +10,7 @@
 //   - No nullable columns without a clear reason documented
 // ═══════════════════════════════════════════════════════════════════════════
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export const CREATE_TABLES = `
 
@@ -247,6 +247,25 @@ CREATE TABLE IF NOT EXISTS sync_meta (
   last_pull_at  TEXT    NOT NULL DEFAULT '1970-01-01T00:00:00.000Z'
 );
 
+-- ─── CONTACT INFO ────────────────────────────────────────────────────────────
+-- Author's contact info per post. LOCAL ONLY. Never transmitted.
+-- Read when approving a contact request; deleted if post is withdrawn.
+CREATE TABLE IF NOT EXISTS contact_info (
+  post_id     TEXT    PRIMARY KEY,
+  contact     TEXT    NOT NULL,
+  created_at  TEXT    NOT NULL
+);
+
+-- ─── CONTACT REVEALS ─────────────────────────────────────────────────────────
+-- Contacts revealed to this device via approved requests.
+-- Stores the decrypted plaintext. LOCAL ONLY. Never transmitted.
+CREATE TABLE IF NOT EXISTS contact_reveals (
+  post_id           TEXT    PRIMARY KEY,
+  author_public_key TEXT    NOT NULL,
+  contact           TEXT    NOT NULL,
+  revealed_at       TEXT    NOT NULL
+);
+
 `;
 
 // ─── MIGRATIONS ─────────────────────────────────────────────────────────────
@@ -254,4 +273,5 @@ CREATE TABLE IF NOT EXISTS sync_meta (
 // Migrations run in order. Never edit existing migrations — add new ones.
 export const MIGRATIONS: Record<number, string> = {
   // v1 is the initial schema above — no migration needed
+  2: `ALTER TABLE identity ADD COLUMN covenant_accepted_at TEXT;`,
 };

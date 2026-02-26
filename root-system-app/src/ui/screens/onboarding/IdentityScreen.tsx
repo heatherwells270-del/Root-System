@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// ROOT SYSTEM — Identity Setup Screen
+// ROOTS — Identity Setup Screen
 //
 // Generates the keypair silently. Asks for optional handle and location.
 // Everything is optional — anonymous is fine. No dark patterns.
@@ -16,6 +16,7 @@ import type { RootStackParamList } from '../../../../App';
 import { Colors, Typography, Spacing } from '../../theme/index';
 import { generateKeypair, generateDeviceId } from '../../../crypto/keypair';
 import { saveIdentity } from '../../../db/identity';
+import { emitAppEvent } from '../../appEvents';
 import type { Identity } from '../../../models/types';
 
 type Props = StackScreenProps<RootStackParamList, 'Identity'>;
@@ -32,7 +33,6 @@ export default function IdentityScreen({ navigation }: Props) {
     setError(null);
 
     try {
-      // Generate keypair — private key goes to SecureStore, never returned
       const publicKey = await generateKeypair();
       const deviceId  = await generateDeviceId();
       const now       = new Date().toISOString();
@@ -45,13 +45,15 @@ export default function IdentityScreen({ navigation }: Props) {
         bio:           null,
         location:      zip.trim() ? { zip: zip.trim(), city: null, state: null, lat: null, lng: null } : null,
         recoveryEmail: null,
-        communityIds:  [],
+        communityIds:       [],
+        covenantAcceptedAt: now,
       };
 
       await saveIdentity(identity);
-      navigation.replace('Main');
+      emitAppEvent('identity-created');
     } catch (e) {
-      setError('Something went wrong setting up your identity. Please try again.');
+      console.error('[Identity] setup failed:', e);
+      setError('Something went wrong setting up your profile. Please try again.');
       setLoading(false);
     }
   }
@@ -64,8 +66,8 @@ export default function IdentityScreen({ navigation }: Props) {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.eyebrow}>Root System</Text>
-        <Text style={styles.title}>Who are you in the commons?</Text>
+        <Text style={styles.appName}>Roots</Text>
+        <Text style={styles.title}>Set up your profile</Text>
         <Text style={styles.subtitle}>
           Everything here is optional. Anonymous is fine.
           You can add or change this anytime from My Root.
@@ -79,7 +81,7 @@ export default function IdentityScreen({ navigation }: Props) {
             value={handle}
             onChangeText={setHandle}
             placeholder="Anonymous is fine"
-            placeholderTextColor={Colors.dim}
+            placeholderTextColor={Colors.textMuted}
             autoCapitalize="none"
             autoCorrect={false}
             maxLength={40}
@@ -95,7 +97,7 @@ export default function IdentityScreen({ navigation }: Props) {
             value={zip}
             onChangeText={t => setZip(t.replace(/\D/g, '').slice(0, 5))}
             placeholder="For finding your community"
-            placeholderTextColor={Colors.dim}
+            placeholderTextColor={Colors.textMuted}
             keyboardType="number-pad"
             maxLength={5}
           />
@@ -108,15 +110,11 @@ export default function IdentityScreen({ navigation }: Props) {
         <View style={styles.keyNotice}>
           <Text style={styles.keyNoticeTitle}>Your identity key</Text>
           <Text style={styles.keyNoticeText}>
-            When you tap "Enter the Commons," a cryptographic keypair is
+            When you tap "Get started," a cryptographic keypair is
             generated on your device. Your private key is stored in your
             device's secure storage and never transmitted anywhere.
             Your public key is your identity on the network —
             it lets others verify that posts came from you.
-          </Text>
-          <Text style={[styles.keyNoticeText, { marginTop: Spacing.sm }]}>
-            You can set up recovery (to restore your identity on a new device)
-            at any time from My Root → Settings.
           </Text>
         </View>
 
@@ -131,13 +129,13 @@ export default function IdentityScreen({ navigation }: Props) {
           accessibilityRole="button"
         >
           {loading
-            ? <ActivityIndicator color={Colors.greenDeep} />
-            : <Text style={styles.enterBtnText}>Enter the Commons</Text>
+            ? <ActivityIndicator color={Colors.textOnDark} />
+            : <Text style={styles.enterBtnText}>Get started</Text>
           }
         </Pressable>
 
         <Text style={styles.skipNote}>
-          You can skip everything above and still use Root System fully.
+          You can skip everything above and still use Roots fully.
         </Text>
       </ScrollView>
     </SafeAreaView>
@@ -154,24 +152,27 @@ const styles = StyleSheet.create({
     padding: Spacing.lg,
     paddingBottom: Spacing.xxl,
   },
-  eyebrow: {
+  appName: {
     fontFamily: Typography.body,
+    fontWeight: '600',
     fontSize: Typography.sm,
-    color: Colors.gold,
+    color: Colors.primary,
     letterSpacing: 2,
     textTransform: 'uppercase',
     marginBottom: Spacing.xs,
   },
   title: {
-    fontFamily: Typography.serifBold,
+    fontFamily: Typography.serif,
+    fontWeight: 'bold',
     fontSize: Typography.xl,
-    color: Colors.cream,
+    color: Colors.text,
     marginBottom: Spacing.xs,
   },
   subtitle: {
-    fontFamily: Typography.bodyItalic,
+    fontFamily: Typography.body,
+    fontStyle: 'italic',
     fontSize: Typography.base,
-    color: Colors.dim,
+    color: Colors.textMuted,
     lineHeight: 24,
     marginBottom: Spacing.lg,
   },
@@ -179,9 +180,10 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.lg,
   },
   label: {
-    fontFamily: Typography.bodySemi,
+    fontFamily: Typography.body,
+    fontWeight: '600',
     fontSize: Typography.sm,
-    color: Colors.moonsilver,
+    color: Colors.textMid,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
     marginBottom: Spacing.xs,
@@ -190,64 +192,67 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface,
     borderWidth: 1,
     borderColor: Colors.border,
-    borderRadius: 4,
+    borderRadius: 6,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm + 2,
     fontFamily: Typography.body,
     fontSize: Typography.base,
-    color: Colors.cream,
+    color: Colors.text,
     marginBottom: Spacing.xs,
   },
   hint: {
-    fontFamily: Typography.bodyItalic,
+    fontFamily: Typography.body,
+    fontStyle: 'italic',
     fontSize: Typography.xs,
-    color: Colors.dim,
+    color: Colors.textMuted,
     lineHeight: 16,
   },
   keyNotice: {
     backgroundColor: Colors.surfaceAlt,
     borderWidth: 1,
     borderColor: Colors.border,
-    borderRadius: 4,
+    borderRadius: 6,
     padding: Spacing.md,
     marginBottom: Spacing.lg,
   },
   keyNoticeTitle: {
-    fontFamily: Typography.serifBold,
+    fontFamily: Typography.serif,
+    fontWeight: 'bold',
     fontSize: Typography.md,
-    color: Colors.gold,
+    color: Colors.textMid,
     marginBottom: Spacing.xs,
   },
   keyNoticeText: {
     fontFamily: Typography.body,
     fontSize: Typography.sm,
-    color: Colors.moonsilver,
+    color: Colors.textMuted,
     lineHeight: 20,
   },
   errorText: {
     fontFamily: Typography.body,
     fontSize: Typography.sm,
-    color: Colors.redAccent,
+    color: Colors.error,
     marginBottom: Spacing.md,
     textAlign: 'center',
   },
   enterBtn: {
-    backgroundColor: Colors.gold,
+    backgroundColor: Colors.primary,
     paddingVertical: Spacing.md,
-    borderRadius: 4,
+    borderRadius: 6,
     alignItems: 'center',
     marginBottom: Spacing.md,
   },
   enterBtnText: {
-    fontFamily: Typography.serifBold,
+    fontFamily: Typography.serif,
+    fontWeight: 'bold',
     fontSize: Typography.md,
-    color: Colors.greenDeep,
-    letterSpacing: 0.5,
+    color: Colors.textOnDark,
   },
   skipNote: {
-    fontFamily: Typography.bodyItalic,
+    fontFamily: Typography.body,
+    fontStyle: 'italic',
     fontSize: Typography.xs,
-    color: Colors.dim,
+    color: Colors.textMuted,
     textAlign: 'center',
   },
 });

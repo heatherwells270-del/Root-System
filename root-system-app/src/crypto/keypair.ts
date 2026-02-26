@@ -15,13 +15,14 @@ import * as SecureStore from 'expo-secure-store';
 import * as Crypto from 'expo-crypto';
 import type { PublicKeyHex, Signature } from '../models/types';
 
-// @noble/ed25519 v3 requires sha512 to be injected for React Native
-// (RN doesn't have the Web Crypto API noble uses by default).
-// The etc object has these properties at runtime but not in its v3 TS types.
-(ed.etc as Record<string, unknown>)['sha512Sync'] =
-  (...msgs: Uint8Array[]) => sha512(ed.etc.concatBytes(...msgs));
-(ed.etc as Record<string, unknown>)['sha512Async'] =
-  (...msgs: Uint8Array[]) => Promise.resolve(sha512(ed.etc.concatBytes(...msgs)));
+// @noble/ed25519 v3 requires sha512 to be injected for React Native —
+// the default hashes.sha512Async uses crypto.subtle (Web Crypto), which
+// doesn't exist in React Native. Inject the pure-JS @noble/hashes sha512
+// into ed.hashes (the object the library actually reads from).
+(ed.hashes as Record<string, unknown>)['sha512'] =
+  (msg: Uint8Array) => sha512(msg);
+(ed.hashes as Record<string, unknown>)['sha512Async'] =
+  (msg: Uint8Array) => Promise.resolve(sha512(msg));
 
 const SECURE_STORE_KEY = 'rs_private_key';
 
@@ -32,6 +33,7 @@ function bytesToHex(bytes: Uint8Array): string {
 }
 
 function hexToBytes(hex: string): Uint8Array {
+  if (hex.length % 2 !== 0) throw new Error(`hexToBytes: odd-length hex string (${hex.length})`);
   const bytes = new Uint8Array(hex.length / 2);
   for (let i = 0; i < hex.length; i += 2) {
     bytes[i / 2] = parseInt(hex.slice(i, i + 2), 16);

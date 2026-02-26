@@ -28,6 +28,7 @@ import { WebSocketServer } from 'ws';
 import type { WebSocket } from 'ws';
 import {
   initDb, cleanNonces, cleanBuffer, cleanKeyRequests,
+  cleanContactRequests, cleanContactResponses,
 } from './store.js';
 import {
   onConnect, onDisconnect, onMessage, sessions,
@@ -48,7 +49,6 @@ const httpServer = createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       status: 'ok',
-      sessions: sessions.size,
       uptime: Math.floor(process.uptime()),
     }));
     return;
@@ -59,7 +59,10 @@ const httpServer = createServer((req, res) => {
 
 // ─── WEBSOCKET SERVER ─────────────────────────────────────────────────────────
 
-const wss = new WebSocketServer({ server: httpServer });
+// maxPayload: 128 KB — well above any legitimate message.
+// Rejects oversized frames before any application code runs,
+// protecting against memory exhaustion via malformed WebSocket frames.
+const wss = new WebSocketServer({ server: httpServer, maxPayload: 128 * 1024 });
 
 wss.on('connection', (ws: WebSocket) => {
   const session = onConnect(ws);
@@ -102,6 +105,32 @@ setInterval(() => {
 setInterval(() => {
   cleanKeyRequests();
 }, 6 * 60 * 60 * 1000);
+
+// Every 6 hours: clean contact requests older than 7 days
+setInterval(() => {
+  cleanContactRequests();
+}, 6 * 60 * 60 * 1000);
+
+// Every 12 hours: clean contact responses older than 48 hours
+setInterval(() => {
+  cleanContactResponses();
+}, 12 * 60 * 60 * 1000);
+
+// Every 12 hours: close sessions authenticated > 24 hours ago.
+// Forces re-auth to prevent stale sessions from accumulating indefinitely.
+setInterval(() => {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  let closed = 0;
+  for (const [, session] of sessions) {
+    if (session.authedAt && session.authedAt < cutoff) {
+      session.ws.close();
+      closed++;
+    }
+  }
+  if (closed > 0) {
+    console.log(`[session-timeout] closed ${closed} stale session(s)`);
+  }
+}, 12 * 60 * 60 * 1000);
 
 // ─── START ────────────────────────────────────────────────────────────────────
 

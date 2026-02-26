@@ -51,6 +51,25 @@ export async function getExchange(id: string): Promise<Exchange | null> {
   return row ? rowToExchange(row) : null;
 }
 
+/** Given and received hours in separate numbers — for values-aligned display. */
+export interface TimebankStats {
+  given:    number;
+  received: number;
+}
+
+export async function getTimebankStats(publicKey: string): Promise<TimebankStats> {
+  const db  = await getDb();
+  const row = await db.getFirstAsync<{ given: number; received: number }>(
+    `SELECT
+       COALESCE(SUM(CASE WHEN from_public_key = ? THEN hours ELSE 0 END), 0) AS given,
+       COALESCE(SUM(CASE WHEN to_public_key   = ? THEN hours ELSE 0 END), 0) AS received
+     FROM exchanges
+     WHERE (from_public_key = ? OR to_public_key = ?) AND status = 'confirmed'`,
+    [publicKey, publicKey, publicKey, publicKey]
+  );
+  return { given: row?.given ?? 0, received: row?.received ?? 0 };
+}
+
 /**
  * Time bank balance for a public key.
  * Derived from all confirmed exchanges — never stored as a single number.
@@ -58,17 +77,15 @@ export async function getExchange(id: string): Promise<Exchange | null> {
  */
 export async function getTimebankBalance(publicKey: string): Promise<number> {
   const db = await getDb();
-  const earned = await db.getFirstAsync<{ total: number }>(
-    `SELECT COALESCE(SUM(hours), 0) as total FROM exchanges
-     WHERE to_public_key = ? AND status = 'confirmed'`,
-    [publicKey]
+  const row = await db.getFirstAsync<{ balance: number }>(
+    `SELECT COALESCE(SUM(
+       CASE WHEN to_public_key = ? THEN hours ELSE -hours END
+     ), 0) AS balance
+     FROM exchanges
+     WHERE (to_public_key = ? OR from_public_key = ?) AND status = 'confirmed'`,
+    [publicKey, publicKey, publicKey]
   );
-  const spent = await db.getFirstAsync<{ total: number }>(
-    `SELECT COALESCE(SUM(hours), 0) as total FROM exchanges
-     WHERE from_public_key = ? AND status = 'confirmed'`,
-    [publicKey]
-  );
-  return (earned?.total ?? 0) - (spent?.total ?? 0);
+  return row?.balance ?? 0;
 }
 
 // ─── WRITES ─────────────────────────────────────────────────────────────────
@@ -152,6 +169,39 @@ export async function disputeExchange(id: string): Promise<void> {
      WHERE id = ?`,
     [new Date().toISOString(), id]
   );
+}
+
+// ─── COMMUNITY + IDENTITY STATS ─────────────────────────────────────────────
+
+export interface CommunityExchangeStats {
+  confirmedThisWeek: number;
+  hoursThisWeek: number;
+}
+
+export async function getCommunityExchangeStats(communityId: string): Promise<CommunityExchangeStats> {
+  const db = await getDb();
+  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const row = await db.getFirstAsync<{ confirmed_this_week: number; hours_this_week: number }>(
+    `SELECT
+       SUM(CASE WHEN status = 'confirmed' AND confirmed_at > ? THEN 1    ELSE 0 END) as confirmed_this_week,
+       SUM(CASE WHEN status = 'confirmed' AND confirmed_at > ? THEN hours ELSE 0 END) as hours_this_week
+     FROM exchanges WHERE community_id = ?`,
+    [weekAgo, weekAgo, communityId]
+  );
+  return {
+    confirmedThisWeek: row?.confirmed_this_week ?? 0,
+    hoursThisWeek:     row?.hours_this_week     ?? 0,
+  };
+}
+
+export async function getConfirmedExchangeCount(publicKey: string): Promise<number> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ count: number }>(
+    `SELECT COUNT(*) as count FROM exchanges
+     WHERE (from_public_key = ? OR to_public_key = ?) AND status = 'confirmed'`,
+    [publicKey, publicKey]
+  );
+  return row?.count ?? 0;
 }
 
 /** Delta sync — all exchanges updated after a timestamp */

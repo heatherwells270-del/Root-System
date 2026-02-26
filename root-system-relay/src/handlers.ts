@@ -26,18 +26,21 @@ import {
   registerCommunity, getCommunity,
   pushBuffer, pullBuffer, ackBuffer,
   enqueueKeyRequest, getPendingKeyRequests, clearKeyRequest,
+  enqueueContactRequest, getPendingContactRequests, clearContactRequest,
+  enqueueContactResponse, getPendingContactResponses, clearContactResponse,
 } from './store.js';
 
 // ─── TYPES ───────────────────────────────────────────────────────────────────
 
 export interface Session {
-  ws:          WebSocket;
-  publicKey:   string | null;   // null until auth completes
-  deviceId:    string | null;
-  sessionId:   string;
-  communityId: string | null;   // null until join
-  authedAt:    number | null;
-  pendingNonce: string | null;  // nonce issued, waiting for auth
+  ws:           WebSocket;
+  publicKey:    string | null;   // null until auth completes
+  deviceId:     string | null;
+  sessionId:    string;
+  communityId:  string | null;   // null until join
+  authedAt:     number | null;
+  pendingNonce: string | null;   // nonce issued, waiting for auth
+  helloAttempts: number;         // brute-force guard — max 3 per connection
 }
 
 // In-memory routing maps
@@ -48,6 +51,10 @@ export const communities = new Map<string, Set<string>>();      // communityId �
 const rateLimits = new Map<string, { windowStart: number; count: number }>();
 const RATE_LIMIT_BUFFER_PUSH = 20;    // per hour per key
 const RATE_LIMIT_WINDOW_MS   = 60 * 60 * 1000;
+
+// Max encrypted blob size: 64 KB. A real post JSON + AES overhead is <10 KB.
+// This prevents resource exhaustion via oversized buffer pushes.
+const MAX_BLOB_BYTES = 64 * 1024;
 
 function checkRateLimit(publicKey: string): boolean {
   const now = Date.now();
@@ -89,6 +96,7 @@ export function onConnect(ws: WebSocket): Session {
   const session: Session = {
     ws, publicKey: null, deviceId: null, sessionId,
     communityId: null, authedAt: null, pendingNonce: null,
+    helloAttempts: 0,
   };
   sessions.set(sessionId, session);
   console.log(`[connect] session=${sessionId}`);
@@ -178,11 +186,29 @@ export async function onMessage(session: Session, raw: string): Promise<void> {
 
     // ── Phase 6: Community key distribution ───────────────────────────────
     case 'key-request':
-      handleKeyRequest(session, msg);
+      await handleKeyRequest(session, msg);
       break;
 
     case 'key-approve':
       handleKeyApprove(session, msg);
+      break;
+
+    // ── Phase 7: Contact reveal handshake ─────────────────────────────────
+    case 'contact-request':
+      handleContactRequest(session, msg);
+      break;
+
+    case 'contact-respond':
+      handleContactRespond(session, msg);
+      break;
+
+    case 'contact-decline':
+      handleContactDecline(session, msg);
+      break;
+
+    // ── Keep-alive ─────────────────────────────────────────────────────────
+    case 'ping':
+      send(session.ws, { v: 1, type: 'pong' });
       break;
 
     default:
@@ -193,6 +219,14 @@ export async function onMessage(session: Session, raw: string): Promise<void> {
 // ─── PHASE 1: AUTH ────────────────────────────────────────────────────────────
 
 async function handleHello(session: Session, msg: Record<string, unknown>): Promise<void> {
+  // Rate-limit auth attempts per connection — prevents brute-force replay
+  session.helloAttempts++;
+  if (session.helloAttempts > 3) {
+    send(session.ws, { v: 1, type: 'auth-failed', reason: 'too many auth attempts' });
+    session.ws.close();
+    return;
+  }
+
   const { publicKey, deviceId, timestamp, sig } = msg as {
     publicKey: string; deviceId: string; timestamp: string; sig: string;
   };
@@ -333,6 +367,32 @@ function handleJoin(session: Session, msg: Record<string, unknown>): void {
     }
   }
 
+  // Deliver any pending contact requests to this author
+  const pendingContactReqs = getPendingContactRequests(session.publicKey!);
+  for (const req of pendingContactReqs) {
+    send(session.ws, {
+      v: 1, type: 'contact-request-pending',
+      requestId: req.id,
+      communityId: req.communityId,
+      requesterPublicKey: req.requesterPublicKey,
+      requesterHandle: req.requesterHandle,
+      postId: req.postId,
+      postTitle: req.postTitle,
+    });
+  }
+
+  // Deliver any pending contact responses to this requester
+  const pendingContactResps = getPendingContactResponses(session.publicKey!);
+  for (const resp of pendingContactResps) {
+    send(session.ws, {
+      v: 1, type: 'contact-response',
+      postId: resp.postId,
+      encryptedContact: resp.encryptedContact,
+      authorPublicKey: resp.authorPublicKey,
+    });
+    clearContactResponse(resp.id);
+  }
+
   console.log(`[join] key=${session.publicKey!.slice(0, 12)}… community=${communityId} peers=${peers.length}`);
 }
 
@@ -366,12 +426,26 @@ function handleSignaling(
 // ─── PHASE 5: POST BUFFER ─────────────────────────────────────────────────────
 
 function handleBufferPush(session: Session, msg: Record<string, unknown>): void {
-  const { communityId, encryptedBlob, pushedAt } = msg as {
-    communityId: string; encryptedBlob: string; pushedAt: string;
+  const { communityId, encryptedBlob } = msg as {
+    communityId: string; encryptedBlob: string;
   };
 
-  if (!communityId || !encryptedBlob || !pushedAt) {
+  if (!communityId || !encryptedBlob) {
     send(session.ws, { v: 1, type: 'error', reason: 'buffer-push: missing fields' });
+    return;
+  }
+
+  // Enforce community membership — only sessions that have joined can push.
+  // Prevents any authenticated outsider from polluting a community's buffer.
+  if (session.communityId !== communityId) {
+    send(session.ws, { v: 1, type: 'error', reason: 'buffer-push: not a member of this community' });
+    return;
+  }
+
+  // Enforce blob size limit — a real post is <10 KB; 64 KB is very generous.
+  // Prevents resource exhaustion via oversized pushes.
+  if (Buffer.byteLength(encryptedBlob, 'utf8') > MAX_BLOB_BYTES) {
+    send(session.ws, { v: 1, type: 'error', reason: 'buffer-push: blob exceeds size limit' });
     return;
   }
 
@@ -381,8 +455,9 @@ function handleBufferPush(session: Session, msg: Record<string, unknown>): void 
     return;
   }
 
+  // Use server-side timestamp — never trust the client's clock for buffer ordering.
   const bufferId = uuidv4();
-  pushBuffer(bufferId, communityId, encryptedBlob, pushedAt);
+  pushBuffer(bufferId, communityId, encryptedBlob, new Date().toISOString());
   send(session.ws, { v: 1, type: 'buffer-ack', bufferId });
 }
 
@@ -391,6 +466,18 @@ function handleBufferPull(session: Session, msg: Record<string, unknown>): void 
 
   if (!communityId || !since) {
     send(session.ws, { v: 1, type: 'error', reason: 'buffer-pull: missing fields' });
+    return;
+  }
+
+  // Validate 'since' is a parseable ISO timestamp — rejects injected SQL or garbage
+  if (isNaN(Date.parse(since))) {
+    send(session.ws, { v: 1, type: 'error', reason: 'buffer-pull: since must be a valid ISO timestamp' });
+    return;
+  }
+
+  // Enforce community membership — only joined sessions can read the buffer.
+  if (session.communityId !== communityId) {
+    send(session.ws, { v: 1, type: 'error', reason: 'buffer-pull: not a member of this community' });
     return;
   }
 
@@ -412,11 +499,21 @@ function handleBufferItemAck(msg: Record<string, unknown>): void {
 
 // ─── PHASE 6: COMMUNITY KEY DISTRIBUTION ─────────────────────────────────────
 
-function handleKeyRequest(session: Session, msg: Record<string, unknown>): void {
-  const { communityId } = msg as { communityId: string };
+async function handleKeyRequest(session: Session, msg: Record<string, unknown>): Promise<void> {
+  const { communityId, sig } = msg as { communityId: string; sig: string };
 
-  if (!communityId) {
-    send(session.ws, { v: 1, type: 'error', reason: 'key-request: communityId required' });
+  if (!communityId || !sig) {
+    send(session.ws, { v: 1, type: 'error', reason: 'key-request: communityId and sig required' });
+    return;
+  }
+
+  // Verify the requester's signature — proves they hold the private key for
+  // session.publicKey, not merely that they know someone else's public key.
+  // Canonical matches what RelayClient.requestCommunityKey() signs.
+  const canonical = `key-request:${communityId}:${session.publicKey}`;
+  const valid = await verifySignature(canonical, sig, session.publicKey!);
+  if (!valid) {
+    send(session.ws, { v: 1, type: 'error', reason: 'key-request: signature invalid' });
     return;
   }
 
@@ -451,6 +548,147 @@ function handleKeyRequest(session: Session, msg: Record<string, unknown>): void 
   }
 }
 
+// ─── PHASE 7: CONTACT REVEAL HANDSHAKE ───────────────────────────────────────
+
+function handleContactRequest(session: Session, msg: Record<string, unknown>): void {
+  const { communityId, authorPublicKey, postId, postTitle, requesterHandle, requestId } = msg as {
+    communityId: string; authorPublicKey: string; postId: string;
+    postTitle: string; requesterHandle: string; requestId: string;
+  };
+
+  if (!communityId || !authorPublicKey || !postId || !requestId) {
+    send(session.ws, { v: 1, type: 'error', reason: 'contact-request: missing fields' });
+    return;
+  }
+
+  if (session.communityId !== communityId) {
+    send(session.ws, { v: 1, type: 'error', reason: 'contact-request: not a member of this community' });
+    return;
+  }
+
+  // Cap queued contact requests per author — prevents queue flooding
+  const pendingForAuthor = getPendingContactRequests(authorPublicKey);
+  if (pendingForAuthor.length >= 20) {
+    send(session.ws, { v: 1, type: 'error', reason: 'contact-request: author contact queue is full, try later' });
+    return;
+  }
+
+  // Find author's session within this community
+  let authorSession: Session | undefined;
+  const members = communities.get(communityId);
+  if (members) {
+    for (const sid of members) {
+      const s = sessions.get(sid);
+      if (s?.publicKey === authorPublicKey) { authorSession = s; break; }
+    }
+  }
+
+  const payload = {
+    v: 1, type: 'contact-request-pending',
+    requestId,
+    communityId,
+    requesterPublicKey: session.publicKey,
+    requesterHandle: requesterHandle ?? 'Anonymous',
+    postId,
+    postTitle: postTitle ?? '',
+  };
+
+  if (authorSession) {
+    send(authorSession.ws, payload);
+  } else {
+    // Author offline — queue for delivery when they reconnect
+    enqueueContactRequest(
+      requestId, communityId, authorPublicKey,
+      session.publicKey!, requesterHandle ?? 'Anonymous',
+      postId, postTitle ?? '',
+    );
+  }
+
+  // Confirm receipt to requester
+  send(session.ws, { v: 1, type: 'contact-request-sent', requestId, postId });
+}
+
+function handleContactRespond(session: Session, msg: Record<string, unknown>): void {
+  const { communityId, requesterPublicKey, postId, encryptedContact, requestId } = msg as {
+    communityId: string; requesterPublicKey: string; postId: string;
+    encryptedContact: string; requestId: string;
+  };
+
+  if (!communityId || !requesterPublicKey || !postId || !encryptedContact) {
+    send(session.ws, { v: 1, type: 'error', reason: 'contact-respond: missing fields' });
+    return;
+  }
+
+  if (session.communityId !== communityId) {
+    send(session.ws, { v: 1, type: 'error', reason: 'contact-respond: not a member of this community' });
+    return;
+  }
+
+  // Remove the request from the queue (it's been handled)
+  if (requestId) clearContactRequest(requestId);
+
+  // Find requester's session
+  let requesterSession: Session | undefined;
+  const members = communities.get(communityId);
+  if (members) {
+    for (const sid of members) {
+      const s = sessions.get(sid);
+      if (s?.publicKey === requesterPublicKey) { requesterSession = s; break; }
+    }
+  }
+
+  const responseMsg = {
+    v: 1, type: 'contact-response',
+    postId,
+    encryptedContact,
+    authorPublicKey: session.publicKey,
+  };
+
+  if (requesterSession) {
+    send(requesterSession.ws, responseMsg);
+  } else {
+    // Requester offline — queue response for delivery on reconnect (48h TTL)
+    const responseId = `${postId}:${requesterPublicKey}`;
+    enqueueContactResponse(
+      responseId, communityId, requesterPublicKey,
+      postId, encryptedContact, session.publicKey!,
+    );
+  }
+}
+
+function handleContactDecline(session: Session, msg: Record<string, unknown>): void {
+  const { communityId, requesterPublicKey, postId, requestId } = msg as {
+    communityId: string; requesterPublicKey: string; postId: string; requestId: string;
+  };
+
+  if (!communityId || !requesterPublicKey || !postId) {
+    send(session.ws, { v: 1, type: 'error', reason: 'contact-decline: missing fields' });
+    return;
+  }
+
+  if (session.communityId !== communityId) {
+    send(session.ws, { v: 1, type: 'error', reason: 'contact-decline: not a member of this community' });
+    return;
+  }
+
+  // Remove the request from the queue
+  if (requestId) clearContactRequest(requestId);
+
+  // Find requester's session and notify if online
+  const members = communities.get(communityId);
+  if (members) {
+    for (const sid of members) {
+      const s = sessions.get(sid);
+      if (s?.publicKey === requesterPublicKey) {
+        send(s.ws, { v: 1, type: 'contact-declined', postId });
+        break;
+      }
+    }
+  }
+  // If requester is offline, decline is silent — they'll see no response
+  // and can re-request. This is intentional (no need to store declined state).
+}
+
 function handleKeyApprove(session: Session, msg: Record<string, unknown>): void {
   const { communityId, requesterPublicKey, encryptedKey } = msg as {
     communityId: string; requesterPublicKey: string; encryptedKey: string;
@@ -475,7 +713,11 @@ function handleKeyApprove(session: Session, msg: Record<string, unknown>): void 
     for (const sid of members) {
       const s = sessions.get(sid);
       if (s?.publicKey === requesterPublicKey) {
-        send(s.ws, { v: 1, type: 'community-key', communityId, encryptedKey });
+        send(s.ws, {
+          v: 1, type: 'community-key',
+          communityId, encryptedKey,
+          planterPublicKey: community.planterPublicKey,
+        });
         delivered = true;
         break;
       }

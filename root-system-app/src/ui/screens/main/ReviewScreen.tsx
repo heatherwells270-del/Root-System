@@ -13,7 +13,7 @@
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, ScrollView, Pressable,
-  StyleSheet, ActivityIndicator, Alert, TextInput,
+  StyleSheet, ActivityIndicator, Alert, TextInput, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -28,15 +28,14 @@ import {
 import { hashFlagIdentity, hashVoteIdentity } from '../../../crypto/encrypt';
 import { sign } from '../../../crypto/keypair';
 import type { Post, Appeal } from '../../../models/types';
-import 'react-native-get-random-values';
-import { v4 as uuidv4 } from 'uuid';
+import * as Crypto from 'expo-crypto';
 
 // ─── HELPERS ────────────────────────────────────────────────────────────────
 
 const SIGNAL_LABELS: Record<SignalPattern, { title: string; detail: string }> = {
   'always-receiver': {
     title: 'Receives more than gives',
-    detail: 'This member has received significantly more time-bank hours than they've given back.',
+    detail: "This member has received significantly more time-bank hours than they've given back.",
   },
   'ghost-logger': {
     title: 'Unconfirmed exchanges',
@@ -44,7 +43,7 @@ const SIGNAL_LABELS: Record<SignalPattern, { title: string; detail: string }> = 
   },
   'flag-accumulator': {
     title: 'Multiple flagged posts',
-    detail: 'Two or more of this member's posts have been flagged by the community.',
+    detail: "Two or more of this member's posts have been flagged by the community.",
   },
   'high-velocity': {
     title: 'High posting rate, new account',
@@ -79,34 +78,49 @@ export default function ReviewScreen() {
   const [appealText,       setAppealText]        = useState('');
   const [appealSubmitting, setAppealSubmitting]  = useState(false);
 
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   async function loadData() {
-    const id = await getIdentity();
-    setIdentity(id);
-    const communityId = id?.communityIds[0];
-    if (!communityId) { setLoading(false); return; }
+    try {
+      const id = await getIdentity();
+      setIdentity(id);
+      const communityId = id?.communityIds[0];
+      if (!communityId) { setLoading(false); return; }
 
-    const [f, r, s] = await Promise.all([
-      getFlaggedPosts(communityId),
-      getRemovedPosts(communityId),
-      getCommunitySignals(communityId),
-    ]);
-    setFlagged(f);
-    setRemoved(r);
-    setSignals(s);
+      const [f, r, s] = await Promise.all([
+        getFlaggedPosts(communityId),
+        getRemovedPosts(communityId),
+        getCommunitySignals(communityId),
+      ]);
+      setFlagged(f);
+      setRemoved(r);
+      setSignals(s);
 
-    // Load appeals for removed posts
-    const appealMap = new Map<string, Appeal | null>();
-    for (const post of r) {
-      appealMap.set(post.id, await getAppealForPost(post.id));
+      // Load appeals for removed posts in parallel
+      const appealEntries = await Promise.all(
+        r.map(async post => [post.id, await getAppealForPost(post.id)] as const)
+      );
+      setAppeals(new Map(appealEntries));
+      setLoadError(null);
+      setLoading(false);
+    } catch (e) {
+      console.error('[ReviewScreen] load failed', e);
+      setLoadError('Could not load. Pull to refresh.');
+      setLoading(false);
     }
-    setAppeals(appealMap);
-    setLoading(false);
   }
 
   useFocusEffect(useCallback(() => {
     setLoading(true);
-    loadData();
+    void loadData();
   }, []));
+
+  async function onRefresh() {
+    setRefreshing(true);
+    await loadData();
+    setRefreshing(false);
+  }
 
   // ── Flag a post ─────────────────────────────────────────────────────────
 
@@ -114,19 +128,24 @@ export default function ReviewScreen() {
     if (!identity) return;
     const flagHash = hashFlagIdentity(identity.publicKey, post.id);
     if (post.flaggedBy.includes(flagHash)) {
-      Alert.alert('Already flagged', 'You've already flagged this post.');
+      Alert.alert('Already flagged', "You've already flagged this post.");
       return;
     }
     Alert.alert(
       'Flag this post?',
-      'Flagging signals to the community that something's off. Three flags from different members removes a post automatically.',
+      "Flagging signals to the community that something's off. Three flags from different members removes a post automatically.",
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Flag it',
           onPress: async () => {
-            await flagPost(post.id, flagHash);
-            loadData();
+            try {
+              await flagPost(post.id, flagHash);
+              void loadData();
+            } catch (e) {
+              Alert.alert('Error', 'Could not flag post. Try again.');
+              console.error('[ReviewScreen] flag failed', e);
+            }
           },
         },
       ]
@@ -142,7 +161,7 @@ export default function ReviewScreen() {
       const now     = new Date().toISOString();
       const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
       const communityId = identity.communityIds[0] ?? 'local';
-      const appealId = uuidv4();
+      const appealId = Crypto.randomUUID();
 
       const appeal: Appeal = {
         id: appealId,
@@ -167,7 +186,7 @@ export default function ReviewScreen() {
       await upsertAppeal(appeal);
       setAppealingPostId(null);
       setAppealText('');
-      loadData();
+      void loadData();
       Alert.alert('Appeal submitted', 'The community will vote. 5 restore votes brings it back; 5 uphold votes closes the appeal.');
     } catch (err) {
       Alert.alert('Error', 'Could not submit appeal.');
@@ -182,16 +201,21 @@ export default function ReviewScreen() {
     if (!identity) return;
     const voterHash = hashVoteIdentity(identity.publicKey, appeal.id);
     if (appeal.voterHashes.includes(voterHash)) {
-      Alert.alert('Already voted', 'You've already voted on this appeal.');
+      Alert.alert('Already voted', "You've already voted on this appeal.");
       return;
     }
     // Own post's appeal — can't vote on your own
     if (appeal.appellantKey === identity.publicKey) {
-      Alert.alert('Can't vote', 'You can't vote on your own appeal.');
+      Alert.alert("Can't vote", "You can't vote on your own appeal.");
       return;
     }
-    await voteOnAppeal(appeal.id, vote, voterHash);
-    loadData();
+    try {
+      await voteOnAppeal(appeal.id, vote, voterHash);
+      void loadData();
+    } catch (e) {
+      Alert.alert('Error', 'Could not cast vote. Try again.');
+      console.error('[ReviewScreen] vote failed', e);
+    }
   }
 
   // ── Render ─────────────────────────────────────────────────────────────
@@ -199,7 +223,7 @@ export default function ReviewScreen() {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator color={Colors.gold} />
+        <ActivityIndicator color={Colors.primary} />
       </View>
     );
   }
@@ -208,6 +232,9 @@ export default function ReviewScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
+      {loadError && (
+        <Text style={styles.loadError}>{loadError}</Text>
+      )}
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Community Review</Text>
@@ -254,7 +281,7 @@ export default function ReviewScreen() {
 
       {/* ── FLAGGED ──────────────────────────────────────────────────── */}
       {communityId && tab === 'flagged' && (
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}>
           <Text style={styles.sectionNote}>
             Posts with one or more community flags. Three flags from different members
             removes a post automatically. Review and flag if something's wrong —
@@ -264,7 +291,7 @@ export default function ReviewScreen() {
           {flagged.length === 0 && (
             <View style={styles.emptyBox}>
               <Text style={styles.emptyIcon}>✦</Text>
-              <Text style={styles.emptyText}>Nothing flagged right now. The commons is clean.</Text>
+              <Text style={styles.emptyText}>Nothing flagged right now. The community is clean.</Text>
             </View>
           )}
 
@@ -276,8 +303,8 @@ export default function ReviewScreen() {
               <View key={post.id} style={styles.card}>
                 <View style={styles.cardTop}>
                   <View style={[styles.typeDot, {
-                    backgroundColor: post.type === 'offer' ? Colors.greenMid
-                      : post.type === 'need' ? Colors.wine : Colors.gold,
+                    backgroundColor: post.type === 'offer' ? Colors.primaryMid
+                      : post.type === 'need' ? Colors.error : Colors.primary,
                   }]} />
                   <Text style={styles.cardType}>
                     {post.type === 'offer' ? 'Offering' : post.type === 'need' ? 'Seeking' : 'Free'}
@@ -321,7 +348,7 @@ export default function ReviewScreen() {
 
       {/* ── REMOVED ──────────────────────────────────────────────────── */}
       {communityId && tab === 'removed' && (
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}>
           <Text style={styles.sectionNote}>
             Posts removed by the community's flag threshold.
             Authors can appeal — 5 restore votes brings a post back.
@@ -386,7 +413,7 @@ export default function ReviewScreen() {
                         disabled={appealSubmitting}
                       >
                         {appealSubmitting
-                          ? <ActivityIndicator color={Colors.greenDeep} size="small" />
+                          ? <ActivityIndicator color={Colors.textOnDark} size="small" />
                           : <Text style={styles.submitSmallText}>Submit appeal</Text>
                         }
                       </Pressable>
@@ -448,7 +475,7 @@ export default function ReviewScreen() {
 
       {/* ── SIGNALS ──────────────────────────────────────────────────── */}
       {communityId && tab === 'signals' && (
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}>
           <Text style={styles.sectionNote}>
             Patterns derived from the community's shared exchange and post history.
             These are observations, not verdicts. Review them together and decide
@@ -535,14 +562,16 @@ const styles = StyleSheet.create({
     borderBottomColor: Colors.border,
   },
   headerTitle: {
-    fontFamily: Typography.serifBold,
+    fontFamily: Typography.serif,
+    fontWeight: 'bold',
     fontSize: Typography.xl,
-    color: Colors.cream,
+    color: Colors.text,
   },
   headerSub: {
-    fontFamily: Typography.bodyItalic,
+    fontFamily: Typography.body,
+    fontStyle: 'italic',
     fontSize: Typography.xs,
-    color: Colors.dim,
+    color: Colors.textMuted,
     marginTop: 2,
   },
 
@@ -558,26 +587,28 @@ const styles = StyleSheet.create({
     borderBottomWidth: 2,
     borderBottomColor: 'transparent',
   },
-  tabActive: { borderBottomColor: Colors.gold },
-  tabText: { fontFamily: Typography.body, fontSize: Typography.xs, color: Colors.dim },
-  tabTextActive: { color: Colors.gold },
+  tabActive: { borderBottomColor: Colors.primary },
+  tabText: { fontFamily: Typography.body, fontSize: Typography.xs, color: Colors.textMuted },
+  tabTextActive: { color: Colors.primary },
 
   content: { padding: Spacing.md, gap: Spacing.md, paddingBottom: Spacing.xxl },
 
   sectionNote: {
-    fontFamily: Typography.bodyItalic,
+    fontFamily: Typography.body,
+    fontStyle: 'italic',
     fontSize: Typography.sm,
-    color: Colors.dim,
+    color: Colors.textMuted,
     lineHeight: 22,
     marginBottom: Spacing.xs,
   },
 
   emptyBox: { alignItems: 'center', paddingTop: Spacing.xxl, gap: Spacing.sm },
-  emptyIcon: { fontSize: 28, color: Colors.gold },
+  emptyIcon: { fontSize: 28, color: Colors.primary },
   emptyText: {
-    fontFamily: Typography.bodyItalic,
+    fontFamily: Typography.body,
+    fontStyle: 'italic',
     fontSize: Typography.base,
-    color: Colors.dim,
+    color: Colors.textMuted,
     textAlign: 'center',
     maxWidth: 260,
     lineHeight: 24,
@@ -598,47 +629,48 @@ const styles = StyleSheet.create({
   },
   cardTop: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, marginBottom: Spacing.sm },
   typeDot: { width: 8, height: 8, borderRadius: 4 },
-  cardType: { fontFamily: Typography.bodySemi, fontSize: Typography.xs, color: Colors.dim, flex: 1 },
-  cardDate: { fontFamily: Typography.bodyItalic, fontSize: Typography.xs, color: Colors.dim },
+  cardType: { fontFamily: Typography.body, fontWeight: '600', fontSize: Typography.xs, color: Colors.textMuted, flex: 1 },
+  cardDate: { fontFamily: Typography.body, fontStyle: 'italic', fontSize: Typography.xs, color: Colors.textMuted },
 
   flagBadge: {
-    backgroundColor: 'rgba(138,37,53,0.2)',
+    backgroundColor: 'rgba(138,37,53,0.12)',
     borderWidth: 1,
-    borderColor: Colors.wine,
+    borderColor: Colors.error,
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: Radius.sm,
   },
-  flagBadgeText: { fontFamily: Typography.bodySemi, fontSize: 10, color: Colors.wine },
+  flagBadgeText: { fontFamily: Typography.body, fontWeight: '600', fontSize: 10, color: Colors.error },
 
   removedBadge: {
     flex: 1,
-    backgroundColor: 'rgba(138,37,53,0.15)',
+    backgroundColor: 'rgba(138,37,53,0.08)',
     borderWidth: 1,
-    borderColor: 'rgba(138,37,53,0.4)',
+    borderColor: 'rgba(138,37,53,0.3)',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: Radius.sm,
     alignSelf: 'flex-start',
   },
-  removedBadgeText: { fontFamily: Typography.bodySemi, fontSize: 10, color: Colors.wine },
+  removedBadgeText: { fontFamily: Typography.body, fontWeight: '600', fontSize: 10, color: Colors.error },
 
   cardTitle: {
-    fontFamily: Typography.serifBold,
+    fontFamily: Typography.serif,
+    fontWeight: 'bold',
     fontSize: Typography.md,
-    color: Colors.cream,
+    color: Colors.text,
     marginBottom: 4,
   },
   cardBody: {
     fontFamily: Typography.body,
     fontSize: Typography.sm,
-    color: Colors.moonsilver,
+    color: Colors.textMuted,
     lineHeight: 20,
     marginBottom: Spacing.sm,
   },
   cardMeta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: Spacing.sm },
-  cardHandle: { fontFamily: Typography.bodyItalic, fontSize: Typography.xs, color: Colors.dim },
-  cardZone:   { fontFamily: Typography.bodyItalic, fontSize: Typography.xs, color: Colors.dim },
+  cardHandle: { fontFamily: Typography.body, fontStyle: 'italic', fontSize: Typography.xs, color: Colors.textMuted },
+  cardZone:   { fontFamily: Typography.body, fontStyle: 'italic', fontSize: Typography.xs, color: Colors.textMuted },
 
   cardActions: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
   flagBtn: {
@@ -646,12 +678,12 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     borderRadius: Radius.sm,
     borderWidth: 1,
-    borderColor: Colors.wine,
-    backgroundColor: 'rgba(138,37,53,0.08)',
+    borderColor: Colors.error,
+    backgroundColor: 'rgba(138,37,53,0.06)',
   },
-  flagBtnText: { fontFamily: Typography.bodySemi, fontSize: Typography.xs, color: Colors.wine },
+  flagBtnText: { fontFamily: Typography.body, fontWeight: '600', fontSize: Typography.xs, color: Colors.error },
   thresholdNote: { flex: 1 },
-  thresholdText: { fontFamily: Typography.bodyItalic, fontSize: Typography.xs, color: Colors.dim },
+  thresholdText: { fontFamily: Typography.body, fontStyle: 'italic', fontSize: Typography.xs, color: Colors.textMuted },
 
   // Appeal UI
   appealBtn: {
@@ -659,21 +691,22 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: Spacing.sm,
     borderWidth: 1,
-    borderColor: Colors.gold,
+    borderColor: Colors.primary,
     borderRadius: Radius.sm,
     alignSelf: 'flex-start',
   },
-  appealBtnText: { fontFamily: Typography.bodySemi, fontSize: Typography.xs, color: Colors.gold },
+  appealBtnText: { fontFamily: Typography.body, fontWeight: '600', fontSize: Typography.xs, color: Colors.primary },
 
   appealForm: { marginTop: Spacing.sm, gap: Spacing.sm },
   appealFormLabel: {
-    fontFamily: Typography.bodyItalic,
+    fontFamily: Typography.body,
+    fontStyle: 'italic',
     fontSize: Typography.sm,
-    color: Colors.moonsilver,
+    color: Colors.textMuted,
     lineHeight: 20,
   },
   input: {
-    backgroundColor: Colors.surfaceAlt ?? Colors.surface,
+    backgroundColor: Colors.surfaceAlt,
     borderWidth: 1,
     borderColor: Colors.border,
     borderRadius: Radius.sm,
@@ -681,7 +714,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontFamily: Typography.body,
     fontSize: Typography.sm,
-    color: Colors.cream,
+    color: Colors.text,
     minHeight: 44,
   },
   textarea: { minHeight: 90, paddingTop: 10 },
@@ -690,10 +723,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: 7,
     borderRadius: Radius.sm,
-    backgroundColor: Colors.gold,
+    backgroundColor: Colors.primary,
   },
-  submitSmallDisabled: { backgroundColor: 'rgba(196,152,46,0.2)' },
-  submitSmallText: { fontFamily: Typography.bodySemi, fontSize: Typography.xs, color: Colors.greenDeep },
+  submitSmallDisabled: { backgroundColor: Colors.primaryLight },
+  submitSmallText: { fontFamily: Typography.body, fontWeight: '600', fontSize: Typography.xs, color: Colors.textOnDark },
   cancelSmall: {
     paddingHorizontal: Spacing.md,
     paddingVertical: 7,
@@ -701,31 +734,31 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
   },
-  cancelSmallText: { fontFamily: Typography.bodySemi, fontSize: Typography.xs, color: Colors.dim },
+  cancelSmallText: { fontFamily: Typography.body, fontWeight: '600', fontSize: Typography.xs, color: Colors.textMuted },
 
   appealVote: {
     marginTop: Spacing.sm,
-    backgroundColor: 'rgba(196,152,46,0.05)',
+    backgroundColor: Colors.primaryLight,
     borderWidth: 1,
-    borderColor: 'rgba(196,152,46,0.15)',
+    borderColor: Colors.border,
     borderRadius: Radius.sm,
     padding: Spacing.sm,
     gap: 6,
   },
-  appealVoteLabel: { fontFamily: Typography.bodySemi, fontSize: Typography.xs, color: Colors.gold },
-  appealReason: { fontFamily: Typography.bodyItalic, fontSize: Typography.sm, color: Colors.moonsilver, lineHeight: 20 },
+  appealVoteLabel: { fontFamily: Typography.body, fontWeight: '600', fontSize: Typography.xs, color: Colors.primary },
+  appealReason: { fontFamily: Typography.body, fontStyle: 'italic', fontSize: Typography.sm, color: Colors.textMuted, lineHeight: 20 },
   voteBar: { flexDirection: 'row' },
-  voteCount: { fontFamily: Typography.body, fontSize: Typography.xs, color: Colors.dim },
+  voteCount: { fontFamily: Typography.body, fontSize: Typography.xs, color: Colors.textMuted },
   voteActions: { flexDirection: 'row', gap: Spacing.sm, marginTop: 4 },
   restoreBtn: {
     paddingHorizontal: Spacing.sm,
     paddingVertical: 5,
     borderRadius: Radius.sm,
     borderWidth: 1,
-    borderColor: Colors.greenMid,
-    backgroundColor: 'rgba(61,107,46,0.15)',
+    borderColor: Colors.primaryMid,
+    backgroundColor: Colors.primaryLight,
   },
-  restoreBtnText: { fontFamily: Typography.bodySemi, fontSize: Typography.xs, color: Colors.greenMid },
+  restoreBtnText: { fontFamily: Typography.body, fontWeight: '600', fontSize: Typography.xs, color: Colors.primaryMid },
   upholdBtn: {
     paddingHorizontal: Spacing.sm,
     paddingVertical: 5,
@@ -733,10 +766,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
   },
-  upholdBtnText: { fontFamily: Typography.bodySemi, fontSize: Typography.xs, color: Colors.dim },
+  upholdBtnText: { fontFamily: Typography.body, fontWeight: '600', fontSize: Typography.xs, color: Colors.textMuted },
 
   appealResolved: { marginTop: Spacing.sm },
-  appealResolvedText: { fontFamily: Typography.bodyItalic, fontSize: Typography.xs },
+  appealResolvedText: { fontFamily: Typography.body, fontStyle: 'italic', fontSize: Typography.xs },
 
   // Signal cards
   signalCard: {
@@ -755,21 +788,22 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   signalHandle: {
-    fontFamily: Typography.serifBold,
+    fontFamily: Typography.serif,
+    fontWeight: 'bold',
     fontSize: Typography.md,
-    color: Colors.cream,
+    color: Colors.text,
     flex: 1,
   },
   signalBadges: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, flexShrink: 1 },
   patternBadge: {
-    backgroundColor: 'rgba(196,152,46,0.1)',
+    backgroundColor: Colors.primaryLight,
     borderWidth: 1,
-    borderColor: 'rgba(196,152,46,0.3)',
+    borderColor: Colors.borderMid,
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 10,
   },
-  patternBadgeText: { fontFamily: Typography.bodySemi, fontSize: 9, color: Colors.gold },
+  patternBadgeText: { fontFamily: Typography.body, fontWeight: '600', fontSize: 9, color: Colors.primary },
 
   statsGrid: {
     flexDirection: 'row',
@@ -778,7 +812,7 @@ const styles = StyleSheet.create({
   },
   statCell: {
     flex: 1,
-    backgroundColor: Colors.surfaceAlt ?? Colors.surface,
+    backgroundColor: Colors.surfaceAlt,
     borderWidth: 1,
     borderColor: Colors.border,
     borderRadius: Radius.sm,
@@ -786,11 +820,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   statNum: {
-    fontFamily: Typography.serifBold,
-    fontSize: Typography.lg ?? Typography.md,
-    color: Colors.cream,
+    fontFamily: Typography.serif,
+    fontWeight: 'bold',
+    fontSize: Typography.lg,
+    color: Colors.text,
   },
-  statLabel: { fontFamily: Typography.bodyItalic, fontSize: 10, color: Colors.dim },
+  statLabel: { fontFamily: Typography.body, fontStyle: 'italic', fontSize: 10, color: Colors.textMuted },
 
   patternDetail: {
     borderTopWidth: 1,
@@ -799,15 +834,25 @@ const styles = StyleSheet.create({
     marginTop: Spacing.xs,
   },
   patternDetailTitle: {
-    fontFamily: Typography.bodySemi,
+    fontFamily: Typography.body,
+    fontWeight: '600',
     fontSize: Typography.xs,
-    color: Colors.moonsilver,
+    color: Colors.textMuted,
     marginBottom: 2,
   },
   patternDetailText: {
-    fontFamily: Typography.bodyItalic,
+    fontFamily: Typography.body,
+    fontStyle: 'italic',
     fontSize: Typography.xs,
-    color: Colors.dim,
+    color: Colors.textMuted,
     lineHeight: 18,
+  },
+  loadError: {
+    fontFamily: Typography.body,
+    fontStyle: 'italic',
+    fontSize: Typography.xs,
+    color: Colors.error,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
   },
 } as const);

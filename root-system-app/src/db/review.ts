@@ -14,6 +14,12 @@
 import { getDb } from './index';
 import type { Post, Appeal } from '../models/types';
 
+function safeParse<T>(json: string | null | undefined, fallback: T): T {
+  if (!json) return fallback;
+  try { return JSON.parse(json) as T; }
+  catch { return fallback; }
+}
+
 // ─── TYPES ──────────────────────────────────────────────────────────────────
 
 /**
@@ -60,13 +66,13 @@ function rowToPost(r: PostRow): Post {
     id: r.id, communityId: r.community_id,
     type: r.type as Post['type'], freeSubtype: r.free_subtype as Post['freeSubtype'],
     category: r.category as Post['category'], zone: r.zone,
-    title: r.title, body: r.body, tags: JSON.parse(r.tags) as string[],
+    title: r.title, body: r.body, tags: safeParse<string[]>(r.tags, []),
     recurring: r.recurring === 1, authorPublicKey: r.author_public_key,
     handle: r.handle, bio: r.bio, contactInfoEncrypted: r.contact_info_encrypted,
     timebankHours: r.timebank_hours,
     createdAt: r.created_at, expiresAt: r.expires_at, renewedAt: r.renewed_at,
     status: r.status as Post['status'], flags: r.flags,
-    flaggedBy: JSON.parse(r.flagged_by) as string[],
+    flaggedBy: safeParse<string[]>(r.flagged_by, []),
     _sig: r.sig, _version: r.version, _updatedAt: r.updated_at,
     _tombstone: r.tombstone === 1,
   };
@@ -77,7 +83,7 @@ function rowToAppeal(r: AppealRow): Appeal {
     id: r.id, communityId: r.community_id, postId: r.post_id,
     appellantKey: r.appellant_key, appealText: r.appeal_text,
     restoreVotes: r.restore_votes, upholdVotes: r.uphold_votes,
-    voterHashes: JSON.parse(r.voter_hashes) as string[],
+    voterHashes: safeParse<string[]>(r.voter_hashes, []),
     status: r.status as Appeal['status'],
     createdAt: r.created_at, expiresAt: r.expires_at,
     _sig: r.sig, _version: r.version, _updatedAt: r.updated_at,
@@ -183,20 +189,26 @@ export async function voteOnAppeal(
   if (newUphold  >= 5) newStatus = 'upheld';
 
   const now = new Date().toISOString();
-  await db.runAsync(
-    `UPDATE appeals SET restore_votes = ?, uphold_votes = ?, voter_hashes = ?,
-       status = ?, version = version + 1, updated_at = ?
-     WHERE id = ?`,
-    [newRestore, newUphold, JSON.stringify(newVoterHashes), newStatus, now, appealId]
-  );
-
-  // If restored, set post status back to active
-  if (newStatus === 'restored') {
+  await db.execAsync('BEGIN');
+  try {
     await db.runAsync(
-      `UPDATE posts SET status = 'active', version = version + 1, updated_at = ?
+      `UPDATE appeals SET restore_votes = ?, uphold_votes = ?, voter_hashes = ?,
+         status = ?, version = version + 1, updated_at = ?
        WHERE id = ?`,
-      [now, appeal.postId]
+      [newRestore, newUphold, JSON.stringify(newVoterHashes), newStatus, now, appealId]
     );
+    // If restored, set post status back to active in the same transaction
+    if (newStatus === 'restored') {
+      await db.runAsync(
+        `UPDATE posts SET status = 'active', version = version + 1, updated_at = ?
+         WHERE id = ?`,
+        [now, appeal.postId]
+      );
+    }
+    await db.execAsync('COMMIT');
+  } catch (err) {
+    try { await db.execAsync('ROLLBACK'); } catch { /* ignore */ }
+    throw err;
   }
 }
 

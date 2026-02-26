@@ -58,17 +58,10 @@ export async function verifySignature(
 
 export function generateNonce(): string {
   // 32 cryptographically random bytes → hex string
+  // globalThis.crypto is available in Node 19+ and all modern runtimes.
+  // The relay requires Node 19+ (package.json engines), so no fallback needed.
   const bytes = new Uint8Array(32);
-  // Use Node.js crypto for random bytes
-  import('crypto').then(({ randomFillSync }) => randomFillSync(bytes));
-  // Sync version via crypto.getRandomValues in Node 19+
-  try {
-    globalThis.crypto.getRandomValues(bytes);
-  } catch {
-    // fallback: use Math.random for non-security-sensitive nonce generation
-    // This only happens in very old Node environments
-    for (let i = 0; i < 32; i++) bytes[i] = Math.floor(Math.random() * 256);
-  }
+  globalThis.crypto.getRandomValues(bytes);
   return bytesToHex(bytes);
 }
 

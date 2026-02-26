@@ -11,15 +11,17 @@ import {
   StyleSheet, ActivityIndicator, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import { Colors, Typography, Spacing, Radius } from '../../theme/index';
 import { getIdentity } from '../../../db/identity';
 import { upsertPost, logPost, getPostCountSince } from '../../../db/posts';
+import { saveContactInfo } from '../../../db/contact_info';
 import { pushPostToRelay } from '../../../sync/index';
 import { sign, canonicalPost } from '../../../crypto/keypair';
 import { detectScamWarnings, detectCrisis, detectMinor, detectFairHousing, CRISIS_RESOURCES } from '../../../safety/index';
 import type { Post, PostType, CategoryId } from '../../../models/types';
-import 'react-native-get-random-values';
-import { v4 as uuidv4 } from 'uuid';
+import * as Crypto from 'expo-crypto';
+import * as Haptics from 'expo-haptics';
 
 // ─── CONSTANTS ──────────────────────────────────────────────────────────────
 
@@ -61,6 +63,35 @@ const TEMPLATES: { label: string; type: PostType; category: CategoryId; title: s
 const RATE_LIMIT_PER_DAY = 5;
 const RATE_LIMIT_PER_10MIN = 2;
 
+// ─── SUCCESS COPY ────────────────────────────────────────────────────────────
+// Type-specific, rotated per submission — warm, not corporate.
+
+const SUCCESS_COPY: Record<PostType, string[]> = {
+  offer: [
+    'Out there now. Someone nearby might need exactly this.',
+    "It's in the community. An offer freely made.",
+    'Posted. 14 days to find who it\'s for.',
+    'The root grows with every skill shared.',
+  ],
+  need: [
+    'Your need is out there. Someone nearby might be the one.',
+    'Asking for help is a form of trust. Thank you for that.',
+    'Out there. Your community might have exactly what you\'re looking for.',
+    'This works because people ask. You just did.',
+  ],
+  free: [
+    'Given freely. That\'s what neighbors do.',
+    'No exchange needed — that\'s the point. Out there now.',
+    'Free in the community. Someone will be glad you did this.',
+    'What you give freely becomes part of the root.',
+  ],
+};
+
+function pickSuccessCopy(type: PostType): string {
+  const lines = SUCCESS_COPY[type];
+  return lines[Math.floor(Math.random() * lines.length)];
+}
+
 // ─── COMPONENT ──────────────────────────────────────────────────────────────
 
 interface FormState {
@@ -94,10 +125,12 @@ const DEFAULT_FORM: FormState = {
 };
 
 export default function PostScreen() {
+  const navigation = useNavigation();
   const [form, setForm]             = useState<FormState>(DEFAULT_FORM);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [submitting, setSubmitting]   = useState(false);
   const [submitted, setSubmitted]     = useState(false);
+  const [successCopy, setSuccessCopy] = useState('');
 
   // Safety state
   const [scamWarnings, setScamWarnings]     = useState<{ id: string; msg: string }[]>([]);
@@ -127,11 +160,14 @@ export default function PostScreen() {
   // ── Safety checks on title/body change ─────────────────────────────────
 
   useEffect(() => {
-    const scam = detectScamWarnings(form.title, form.body);
-    setScamWarnings(scam);
-    setCrisisFlag(detectCrisis(form.title, form.body));
-    setMinorFlag(detectMinor(`${form.title} ${form.body}`));
-    setFairHousingFlag(detectFairHousing(form.title, form.body));
+    try {
+      setScamWarnings(detectScamWarnings(form.title, form.body));
+      setCrisisFlag(detectCrisis(form.title, form.body));
+      setMinorFlag(detectMinor(`${form.title} ${form.body}`));
+      setFairHousingFlag(detectFairHousing(form.title, form.body));
+    } catch (e) {
+      console.error('[PostScreen] safety check failed', e);
+    }
   }, [form.title, form.body]);
 
   // ── Helpers ────────────────────────────────────────────────────────────
@@ -198,7 +234,7 @@ export default function PostScreen() {
     setSubmitting(true);
     try {
       const communityId = identity.communityIds[0] ?? 'local';
-      const postId = uuidv4();
+      const postId = Crypto.randomUUID();
       const now8601 = new Date().toISOString();
       const expires = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(); // 14 days
 
@@ -242,8 +278,15 @@ export default function PostScreen() {
 
       await upsertPost(post);
       await logPost(postId);
+      // Save contact info locally — never stored in the post blob or relay.
+      // Only revealed to requesters after the author explicitly approves.
+      if (form.contactInfo.trim()) {
+        await saveContactInfo(postId, form.contactInfo.trim());
+      }
       void pushPostToRelay(post);  // fire-and-forget: relay push is best-effort
 
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setSuccessCopy(pickSuccessCopy(form.type));
       setSubmitted(true);
       setForm(DEFAULT_FORM);
       setDetailsOpen(false);
@@ -257,18 +300,35 @@ export default function PostScreen() {
 
   // ── Render ─────────────────────────────────────────────────────────────
 
+  const canDismiss = navigation.canGoBack();
+
   if (submitted) {
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
+        {canDismiss && (
+          <View style={styles.headerRow}>
+            <Pressable style={styles.dismissBtn} onPress={() => navigation.goBack()} accessibilityLabel="Close">
+              <Text style={styles.dismissText}>✕</Text>
+            </Pressable>
+          </View>
+        )}
         <View style={styles.successBox}>
           <Text style={styles.successIcon}>✦</Text>
-          <Text style={styles.successTitle}>Posted</Text>
-          <Text style={styles.successBody}>
-            Your post is live in the commons. It expires in 14 days — you can renew it from My Root.
+          <Text style={styles.successTitle}>Planted.</Text>
+          <Text style={styles.successBody}>{successCopy}</Text>
+          <Text style={styles.successNote}>
+            Live in the community for 14 days. Renew anytime from My Root.
           </Text>
-          <Pressable style={styles.successBtn} onPress={() => setSubmitted(false)}>
-            <Text style={styles.successBtnText}>Post another</Text>
-          </Pressable>
+          <View style={styles.successActions}>
+            <Pressable style={styles.successBtn} onPress={() => setSubmitted(false)}>
+              <Text style={styles.successBtnText}>Post another</Text>
+            </Pressable>
+            {canDismiss && (
+              <Pressable style={[styles.successBtn, styles.successBtnClose]} onPress={() => navigation.goBack()}>
+                <Text style={styles.successBtnText}>Close</Text>
+              </Pressable>
+            )}
+          </View>
         </View>
       </SafeAreaView>
     );
@@ -283,7 +343,14 @@ export default function PostScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.screenTitle}>New Post</Text>
+        <View style={styles.headerRow}>
+          <Text style={styles.screenTitle}>New Post</Text>
+          {canDismiss && (
+            <Pressable style={styles.dismissBtn} onPress={() => navigation.goBack()} accessibilityLabel="Close">
+              <Text style={styles.dismissText}>✕</Text>
+            </Pressable>
+          )}
+        </View>
 
         {/* ── TYPE CARDS ─────────────────────────────────────────────── */}
         <View style={styles.typeGrid}>
@@ -390,7 +457,7 @@ export default function PostScreen() {
           autoCorrect={false}
         />
         <Text style={styles.fieldHint}>
-          This is encrypted on your device and only revealed when you explicitly confirm an exchange.
+          Stored only on your device. When someone requests contact, you approve or decline before anything is shared.
         </Text>
 
         {/* ── DETAILS TOGGLE ─────────────────────────────────────────── */}
@@ -463,6 +530,17 @@ export default function PostScreen() {
                 </Pressable>
               ))}
             </View>
+
+            {/* Static Fair Housing reminder when housing category is selected */}
+            {form.category === 'housing' && (
+              <View style={styles.warningBox}>
+                <Text style={styles.warningText}>
+                  Fair Housing Act: housing listings cannot restrict based on race, color,
+                  national origin, religion, sex, familial status, or disability.
+                  Violations may result in federal civil liability.
+                </Text>
+              </View>
+            )}
 
             {/* Zone */}
             <Text style={styles.fieldLabel}>Zone</Text>
@@ -568,13 +646,13 @@ export default function PostScreen() {
         <Pressable
           style={[styles.submitBtn, (submitting || rateLimited) && styles.submitBtnDisabled]}
           onPress={handleSubmit}
-          disabled={submitting || rateLimited}
+          disabled={submitting}
           accessibilityRole="button"
         >
           {submitting
-            ? <ActivityIndicator color={Colors.greenDeep} />
-            : <Text style={[styles.submitBtnText, (submitting || rateLimited) && styles.submitBtnTextDisabled]}>
-                Post to the Commons
+            ? <ActivityIndicator color={Colors.textOnDark} />
+            : <Text style={[styles.submitBtnText, rateLimited && styles.submitBtnTextDisabled]}>
+                {rateLimited ? 'Rate limited — try again soon' : 'Post to the community'}
               </Text>
           }
         </Pressable>
@@ -595,11 +673,32 @@ const styles = StyleSheet.create({
   scroll:  { flex: 1 },
   content: { padding: Spacing.lg, paddingBottom: Spacing.xxl },
 
-  screenTitle: {
-    fontFamily: Typography.serifBold,
-    fontSize: Typography.xl,
-    color: Colors.cream,
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: Spacing.lg,
+  },
+  screenTitle: {
+    fontFamily: Typography.serif,
+    fontWeight: 'bold',
+    fontSize: Typography.xl,
+    color: Colors.text,
+    flex: 1,
+  },
+  dismissBtn: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radius.full,
+    backgroundColor: Colors.surfaceAlt,
+  },
+  dismissText: {
+    fontFamily: Typography.body,
+    fontSize: Typography.base,
+    color: Colors.textMuted,
+    lineHeight: 20,
   },
 
   // Type cards
@@ -622,23 +721,25 @@ const styles = StyleSheet.create({
   typeCard_offer: { borderColor: Colors.border },
   typeCard_need:  { borderColor: Colors.border },
   typeCard_free:  { borderColor: Colors.border },
-  typeCard_offer_active: { backgroundColor: 'rgba(61,107,46,0.2)',  borderColor: Colors.greenMid },
-  typeCard_need_active:  { backgroundColor: 'rgba(138,37,53,0.2)',  borderColor: Colors.wine },
-  typeCard_free_active:  { backgroundColor: 'rgba(196,152,46,0.12)', borderColor: Colors.gold },
+  typeCard_offer_active: { backgroundColor: Colors.primaryLight, borderColor: Colors.primaryMid },
+  typeCard_need_active:  { backgroundColor: 'rgba(138,37,53,0.08)', borderColor: Colors.error },
+  typeCard_free_active:  { backgroundColor: Colors.primaryLight, borderColor: Colors.primary },
   typeCardLabel: {
-    fontFamily: Typography.serifBold,
+    fontFamily: Typography.serif,
+    fontWeight: 'bold',
     fontSize: Typography.sm,
-    color: Colors.dim,
+    color: Colors.textMuted,
     textAlign: 'center',
     lineHeight: 18,
   },
-  typeCardLabel_offer_active: { color: Colors.greenMid },
-  typeCardLabel_need_active:  { color: Colors.wine },
-  typeCardLabel_free_active:  { color: Colors.gold },
+  typeCardLabel_offer_active: { color: Colors.primaryMid },
+  typeCardLabel_need_active:  { color: Colors.error },
+  typeCardLabel_free_active:  { color: Colors.primary },
   typeCardSub: {
-    fontFamily: Typography.bodyItalic,
+    fontFamily: Typography.body,
+    fontStyle: 'italic',
     fontSize: 10,
-    color: Colors.earth,
+    color: Colors.textMuted,
     textAlign: 'center',
     marginTop: 4,
     lineHeight: 14,
@@ -646,16 +747,18 @@ const styles = StyleSheet.create({
 
   // Fields
   fieldLabel: {
-    fontFamily: Typography.bodySemi,
+    fontFamily: Typography.body,
+    fontWeight: '600',
     fontSize: Typography.sm,
-    color: Colors.cream,
+    color: Colors.text,
     marginBottom: 6,
     marginTop: Spacing.md,
   },
   fieldHint: {
-    fontFamily: Typography.bodyItalic,
+    fontFamily: Typography.body,
+    fontStyle: 'italic',
     fontSize: Typography.xs,
-    color: Colors.dim,
+    color: Colors.textMuted,
     lineHeight: 18,
     marginBottom: 4,
   },
@@ -668,7 +771,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontFamily: Typography.body,
     fontSize: Typography.sm,
-    color: Colors.cream,
+    color: Colors.text,
     minHeight: 44,
   },
   textarea: {
@@ -676,18 +779,19 @@ const styles = StyleSheet.create({
     paddingTop: 10,
   },
   charCount: {
-    fontFamily: Typography.bodyItalic,
+    fontFamily: Typography.body,
+    fontStyle: 'italic',
     fontSize: Typography.xs,
-    color: Colors.dim,
+    color: Colors.textMuted,
     textAlign: 'right',
     marginTop: 2,
   },
 
   // Warnings
   warningBox: {
-    backgroundColor: 'rgba(196,152,46,0.08)',
+    backgroundColor: 'rgba(45,74,62,0.06)',
     borderLeftWidth: 2,
-    borderLeftColor: Colors.gold,
+    borderLeftColor: Colors.primary,
     padding: Spacing.sm,
     marginTop: Spacing.sm,
     borderRadius: 2,
@@ -695,37 +799,38 @@ const styles = StyleSheet.create({
   warningText: {
     fontFamily: Typography.body,
     fontSize: Typography.xs,
-    color: Colors.moonsilver,
+    color: Colors.textMuted,
     lineHeight: 18,
   },
   crisisBox: {
-    backgroundColor: 'rgba(138,37,53,0.1)',
+    backgroundColor: 'rgba(138,37,53,0.06)',
     borderWidth: 1,
-    borderColor: Colors.wine,
+    borderColor: Colors.error,
     padding: Spacing.md,
     marginTop: Spacing.sm,
     borderRadius: Radius.sm,
   },
   crisisTitle: {
-    fontFamily: Typography.serifBold,
+    fontFamily: Typography.serif,
+    fontWeight: 'bold',
     fontSize: Typography.md,
-    color: Colors.cream,
+    color: Colors.text,
     marginBottom: 4,
   },
   crisisBody: {
     fontFamily: Typography.body,
     fontSize: Typography.sm,
-    color: Colors.moonsilver,
+    color: Colors.textMuted,
     lineHeight: 20,
     marginBottom: Spacing.sm,
   },
   crisisResource: {
     fontFamily: Typography.body,
     fontSize: Typography.sm,
-    color: Colors.moonsilver,
+    color: Colors.textMuted,
     lineHeight: 22,
   },
-  bold: { fontFamily: Typography.bodySemi, color: Colors.cream },
+  bold: { fontFamily: Typography.body, fontWeight: '600', color: Colors.text },
 
   // Details toggle
   detailsToggle: {
@@ -733,17 +838,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.xs,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(196,152,46,0.1)',
+    borderTopColor: Colors.border,
     paddingTop: Spacing.md,
     marginTop: Spacing.md,
   },
   detailsToggleText: {
-    fontFamily: Typography.bodyItalic,
+    fontFamily: Typography.body,
+    fontStyle: 'italic',
     fontSize: Typography.sm,
-    color: Colors.earth,
+    color: Colors.textMuted,
   },
   detailsBadge: {
-    backgroundColor: 'rgba(196,152,46,0.15)',
+    backgroundColor: Colors.primaryLight,
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 10,
@@ -751,11 +857,11 @@ const styles = StyleSheet.create({
   detailsBadgeText: {
     fontFamily: Typography.body,
     fontSize: Typography.xs,
-    color: Colors.gold,
+    color: Colors.primary,
   },
   detailsBody: {
     borderTopWidth: 1,
-    borderTopColor: 'rgba(196,152,46,0.08)',
+    borderTopColor: Colors.border,
     paddingTop: Spacing.sm,
   },
 
@@ -770,15 +876,15 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   chipActive: {
-    borderColor: Colors.gold,
-    backgroundColor: 'rgba(196,152,46,0.12)',
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primaryLight,
   },
   chipText: {
     fontFamily: Typography.body,
     fontSize: Typography.xs,
-    color: Colors.dim,
+    color: Colors.textMuted,
   },
-  chipTextActive: { color: Colors.gold },
+  chipTextActive: { color: Colors.primary },
 
   // Recurring checkbox
   checkRow: {
@@ -799,25 +905,26 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   checkboxChecked: {
-    backgroundColor: 'rgba(196,152,46,0.15)',
-    borderColor: Colors.gold,
+    backgroundColor: Colors.primaryLight,
+    borderColor: Colors.primary,
   },
   checkmark: {
-    color: Colors.gold,
+    color: Colors.primary,
     fontSize: 13,
-    fontFamily: Typography.bodySemi,
+    fontFamily: Typography.body,
+    fontWeight: '600',
   },
   checkLabel: {
     flex: 1,
     fontFamily: Typography.body,
     fontSize: Typography.sm,
-    color: Colors.cream,
+    color: Colors.text,
     lineHeight: 22,
   },
 
   // Submit
   submitBtn: {
-    backgroundColor: Colors.gold,
+    backgroundColor: Colors.primary,
     paddingVertical: Spacing.md,
     borderRadius: Radius.sm,
     alignItems: 'center',
@@ -825,19 +932,21 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
   },
   submitBtnDisabled: {
-    backgroundColor: 'rgba(196,152,46,0.2)',
+    backgroundColor: Colors.primaryLight,
   },
   submitBtnText: {
-    fontFamily: Typography.serifBold,
+    fontFamily: Typography.serif,
+    fontWeight: 'bold',
     fontSize: Typography.md,
-    color: Colors.greenDeep,
+    color: Colors.textOnDark,
     letterSpacing: 0.5,
   },
-  submitBtnTextDisabled: { color: Colors.dim },
+  submitBtnTextDisabled: { color: Colors.textMuted },
   footerHint: {
-    fontFamily: Typography.bodyItalic,
+    fontFamily: Typography.body,
+    fontStyle: 'italic',
     fontSize: Typography.xs,
-    color: Colors.dim,
+    color: Colors.textMuted,
     textAlign: 'center',
     lineHeight: 18,
     marginBottom: Spacing.lg,
@@ -853,34 +962,53 @@ const styles = StyleSheet.create({
   successIcon: {
     fontFamily: Typography.serif,
     fontSize: 32,
-    color: Colors.gold,
+    color: Colors.primary,
     marginBottom: Spacing.md,
   },
   successTitle: {
-    fontFamily: Typography.serifBold,
+    fontFamily: Typography.serif,
+    fontWeight: 'bold',
     fontSize: Typography.xxl,
-    color: Colors.cream,
+    color: Colors.text,
     marginBottom: Spacing.sm,
   },
   successBody: {
-    fontFamily: Typography.body,
-    fontSize: Typography.base,
-    color: Colors.moonsilver,
+    fontFamily: Typography.serif,
+    fontStyle: 'italic',
+    fontSize: Typography.md,
+    color: Colors.textMuted,
     textAlign: 'center',
-    lineHeight: 24,
-    marginBottom: Spacing.xl,
+    lineHeight: 26,
     maxWidth: 300,
+  },
+  successNote: {
+    fontFamily: Typography.body,
+    fontStyle: 'italic',
+    fontSize: Typography.xs,
+    color: Colors.textMuted,
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: Spacing.xl,
+    maxWidth: 280,
+  },
+  successActions: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
   },
   successBtn: {
     borderWidth: 1,
-    borderColor: Colors.gold,
+    borderColor: Colors.primary,
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.sm,
     borderRadius: Radius.sm,
   },
+  successBtnClose: {
+    borderColor: Colors.borderMid,
+  },
   successBtnText: {
-    fontFamily: Typography.serifBold,
+    fontFamily: Typography.serif,
+    fontWeight: 'bold',
     fontSize: Typography.md,
-    color: Colors.gold,
+    color: Colors.primary,
   },
 } as const);
