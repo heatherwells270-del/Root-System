@@ -1,4 +1,4 @@
-# The Root System Covenant
+# The Root System agreement
 ### Short Form — Community Agreement
 
 ---
@@ -15,7 +15,7 @@ There is a human being on the other end of every post, every exchange, every mes
 
 **By entering and posting, you agree:**
 
-You are 18 or older. You are here to help neighbors, share what you have, ask for what you need, and protect everyone in this space. Not to profit from them. Not to exploit them. Not to collect their information for any purpose other than the exchange you are making.
+You are 18 or older. You are here to help neighbors, share what you have, ask for what you need, and protect everyone in this space. Not to profit from them, exploit them, collect their information for any purpose other than the exchange you are making.
 
 You will meet people in public first. You will share only what you are genuinely comfortable sharing. You will not pressure anyone, create false urgency, or ask for upfront payment before any exchange occurs.
 
@@ -47,13 +47,13 @@ Openness and transparency are the operating values of this space. Honesty is pro
 
 We hold ourselves to high integrity in every interaction. We say what we mean. We do what we say. We correct ourselves when we're wrong. We remember that the person across every exchange is a full human being with dignity, complexity, and a life we don't fully know.
 
-This commons was built to last — not for a moment, not for a movement, not for a brand. For communities. It will only last if the people in it hold it carefully.
+This commons was built to last. This is not to be used for a moment, movement, or brand. This is for communities. It will only last if the people in it hold it carefully.
 
 ---
 
 **On privacy:**
 
-Your identity on this network is a cryptographic key generated on your device — not an account, not a username tied to your email or phone number. Your private key never leaves your device. Everything you post is encrypted before it leaves your phone. The relay server that connects members cannot read any of it.
+Your identity on this network is a cryptographic key generated on your device, not an account or a username tied to your email or phone number. Your private key never leaves your device. Everything you post is encrypted before it leaves your phone. The relay server that connects members cannot read any of it.
 
 Contact information is never transmitted in plain text. If you choose to share it, it travels as an encrypted message addressed only to the recipient's key. Nothing else has access to it.
 
@@ -63,7 +63,7 @@ Your data belongs to you. You can export or delete everything at any time.
 
 **On safety:**
 
-If you witness or experience a safety incident through this network — exploitation, predatory behavior, trafficking, abuse — report it immediately to law enforcement or an appropriate community safety organization: a domestic violence hotline, legal aid organization, or community advocate. This commons belongs to all of us. Its safety is our collective responsibility.
+If you witness or experience a safety incident through this network — exploitation, predatory behavior, trafficking, abuse — report it immediately to an appropriate community safety organization: law enforcement if necessary, a domestic violence hotline, legal aid organization, or community advocate. This commons belongs to all of us. Its safety is our collective responsibility.
 
 ---
 
